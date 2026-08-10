@@ -13,9 +13,9 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M2 in progress
+## Status: M2 (RAG v1) done
 
-M1 (scaffold, `/health`, streaming `/chat`) is done. M2 ingestion is built: a client-side diff against Qdrant decides what's new/changed/deleted in StudyLife's notes, changed notes are chunked, embedded, and upserted (see [Usage → Ingestion](#ingestion)). RAG retrieval is not wired into `/chat` yet — that's the next step, pending the retrieval-design decision logged in [docs/decisions.md](docs/decisions.md). See [Roadmap](#roadmap).
+M1 (scaffold, `/health`, streaming `/chat`) is done. M2 is done: ingestion diffs StudyLife's notes against Qdrant and keeps chunks in sync (see [Ingestion](#ingestion)), and `/chat` is now RAG-augmented — every request retrieves relevant note chunks and answers with inline `[n]` citations plus a deterministic source list (design in [docs/decisions.md](docs/decisions.md)). End-to-end tested against a local StudyLife dev instance with real demo data. See [Roadmap](#roadmap).
 
 ## Architecture
 
@@ -108,7 +108,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 ## API
 
 - `GET /health` — liveness check.
-- `POST /chat` — streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. Each event is `data: {"delta": "..."}`; the stream ends with `data: [DONE]`.
+- `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant note chunks (see [Retrieval design](docs/decisions.md)), injected as a system message ahead of the conversation. Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"note_id": ..., "title": "...", "course_id": ...}, ...]}` listing the notes actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
 
 ## Ingestion
 
@@ -131,7 +131,7 @@ No eval pipeline yet — planned for M3 (RAGAS + a versioned eval set). Results 
 ## Roadmap
 
 - [x] **M1** — Repo scaffold: FastAPI service with `/health` and streaming `/chat` (LiteLLM, no RAG), Docker + Compose, CI (lint + tests), README v1.
-- [ ] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
+- [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
 - [ ] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [ ] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
