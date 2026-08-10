@@ -1,6 +1,8 @@
 # StudyLife AI
 
-A standalone Python microservice that adds an LLM agent to [StudyLife](#) (Blazor WASM + ASP.NET Core, .NET 10), a self-hosted study platform. It will provide:
+[![CI](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml)
+
+A standalone Python microservice that adds an LLM agent to [StudyLife](https://github.com/lukislp/studylife) (Blazor WASM + ASP.NET Core, .NET 10), a self-hosted study platform. It will provide:
 
 - **Study Assistant (RAG)** — answer questions about notes, courses, and calendar data, with citations back to the source note.
 - **Study Plan Generator** — turn exam dates, ECTS targets, and availability into a weekly plan.
@@ -55,8 +57,10 @@ docker compose up --build
 This starts the FastAPI service, Qdrant, and Ollama. To use the default local model:
 
 ```bash
-docker compose exec ollama ollama pull llama3.1
+docker compose exec ollama ollama pull llama3.2
 ```
+
+No GPU, or the local model is too slow? Skip Ollama and point `/chat` at an API provider instead: set `LLM_MODEL=openai/gpt-4o-mini` and `OPENAI_API_KEY=sk-...` in `.env` (leave `LLM_API_BASE` empty).
 
 Then check the service is up:
 
@@ -86,7 +90,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `APP_NAME`                     | `StudyLife AI`            | Display name used in the FastAPI app metadata.                              |
 | `ENVIRONMENT`                  | `local`                   | One of `local`, `staging`, `production`.                                    |
 | `LOG_LEVEL`                    | `INFO`                    | Python logging level.                                                       |
-| `LLM_MODEL`                    | `ollama/llama3.1`         | LiteLLM model identifier; selects provider and model, e.g. `openai/gpt-4o-mini`. |
+| `LLM_MODEL`                    | `ollama/llama3.2`         | LiteLLM model identifier; selects provider and model, e.g. `openai/gpt-4o-mini`. |
 | `LLM_API_BASE`                 | `http://localhost:11434`  | Base URL for self-hosted model backends (e.g. Ollama). Unused for most API providers. |
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
