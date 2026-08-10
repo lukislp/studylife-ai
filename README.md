@@ -13,9 +13,9 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M1
+## Status: M2 in progress
 
-Current milestone: repository scaffold, health endpoint, and a streaming `/chat` endpoint (LiteLLM, no RAG yet). See [Roadmap](#roadmap).
+M1 (scaffold, `/health`, streaming `/chat`) is done. M2 ingestion is built: a client-side diff against Qdrant decides what's new/changed/deleted in StudyLife's notes, changed notes are chunked, embedded, and upserted (see [Usage → Ingestion](#ingestion)). RAG retrieval is not wired into `/chat` yet — that's the next step, pending the retrieval-design decision logged in [docs/decisions.md](docs/decisions.md). See [Roadmap](#roadmap).
 
 ## Architecture
 
@@ -95,11 +95,33 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `LLM_API_BASE`                 | `http://localhost:11434`  | Base URL for self-hosted model backends (e.g. Ollama). Unused for most API providers. |
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
+| `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. Required for ingestion. |
+| `STUDYLIFE_API_KEY`            | _(unset)_                 | StudyLife's non-interactive API key (Settings → API key for integrations, after a passkey login). Required for ingestion. |
+| `STUDYLIFE_USER_ID`            | `primary`                 | Arbitrary label stored on ingested chunks, not a StudyLife-internal ID — see [docs/decisions.md](docs/decisions.md). |
+| `EMBEDDING_MODEL`              | `ollama/nomic-embed-text` | LiteLLM embedding model identifier, same provider convention as `LLM_MODEL`. |
+| `QDRANT_URL`                   | `http://localhost:6333`  | Qdrant connection URL.                                                      |
+| `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for note chunks.                                     |
+| `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
+| `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
 
 ## API
 
 - `GET /health` — liveness check.
 - `POST /chat` — streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. Each event is `data: {"delta": "..."}`; the stream ends with `data: [DONE]`.
+
+## Ingestion
+
+Syncs StudyLife notes into Qdrant: fetches all notes, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. Requires `STUDYLIFE_API_BASE_URL` and `STUDYLIFE_API_KEY` to be set.
+
+```bash
+# via docker compose (uses the running app container's environment)
+docker compose exec app python -m studylife_ai.ingestion
+
+# local dev
+uv run python -m studylife_ai.ingestion
+```
+
+There's no scheduler yet — run it manually or via your own cron for now; recurring sync is a deployment concern for a later milestone.
 
 ## Evaluation
 
