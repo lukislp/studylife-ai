@@ -31,3 +31,39 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
       - run: uv run pytest
+
+  eval:
+    # Only on push to main, not on every PR commit (docs/decisions.md "M3 eval
+    # design") - this job calls a paid judge model, so its cost should stay
+    # bounded rather than scale with PR activity. No score thresholds yet
+    # either - this just needs to run without raising; the printed scores are
+    # for humans to read in the job log until a real baseline justifies gates.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+    env:
+      QDRANT_URL: http://localhost:6333
+      QDRANT_COLLECTION: studylife_notes_ci
+      # No local Ollama in CI, so both generation and embeddings use OpenAI
+      # here too - the same judge account/key, see docs/decisions.md.
+      LLM_MODEL: openai/gpt-4o-mini
+      EMBEDDING_MODEL: openai/text-embedding-3-small
+      EVAL_JUDGE_MODEL: openai/gpt-4o-mini
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.5.8"
+          cache-suffix: "eval"
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      # Seeds eval/fixture_notes.jsonl into the empty Qdrant service container
+      # above - CI has no real StudyLife instance to ingest from (see
+      # src/studylife_ai/eval/fixture.py).
+      - run: uv run python -m studylife_ai.eval.seed_fixture
+      - run: uv run python -m studylife_ai.eval | tee "$GITHUB_STEP_SUMMARY"
