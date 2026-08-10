@@ -51,6 +51,10 @@ jobs:
       # No local Ollama in CI, so both generation and embeddings use OpenAI
       # here too - the same judge account/key, see docs/decisions.md.
       LLM_MODEL: openai/gpt-4o-mini
+      # LLM_API_BASE must be cleared: Settings defaults it to Ollama's URL
+      # (http://localhost:11434), which would force even this OpenAI model
+      # through a custom api_base litellm can't reach in CI.
+      LLM_API_BASE: ""
       EMBEDDING_MODEL: openai/text-embedding-3-small
       EVAL_JUDGE_MODEL: openai/gpt-4o-mini
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
