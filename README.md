@@ -24,7 +24,6 @@ flowchart LR
     subgraph StudyLife["StudyLife (.NET, existing)"]
         BlazorUI["Blazor WASM UI"]
         StudyLifeAPI["ASP.NET Core REST API"]
-        StudyLifeDB[("StudyLife DB")]
     end
 
     subgraph AI["StudyLife AI (this repo)"]
@@ -42,7 +41,7 @@ flowchart LR
     LiteLLM --> LLMProviders
     LiteLLM --> Ollama
     FastAPI -. tool calls, M4 .-> StudyLifeAPI
-    Ingestion -. reads, M2 .-> StudyLifeDB
+    Ingestion -. reads, M2 .-> StudyLifeAPI
     Ingestion -. writes, M2 .-> Qdrant
     FastAPI -. retrieval, M2 .-> Qdrant
 ```
@@ -123,7 +122,7 @@ No eval pipeline yet — planned for M3 (RAGAS + a versioned eval set). Results 
 | Agent framework | LangGraph (from M4)                                            |
 | LLM             | Provider-agnostic via LiteLLM; API models + local via Ollama   |
 | Vector DB       | Qdrant (from M2)                                                |
-| Ingestion       | Python worker reading from the StudyLife DB (from M2)          |
+| Ingestion       | Python worker reading from the StudyLife REST API (from M2)    |
 | Evaluation      | RAGAS + a versioned eval set (from M3)                         |
 | Deployment      | Docker, k3s manifests, GitHub Actions CI                       |
 | Frontend        | Blazor WASM chat component in the StudyLife repo (separate step) |
