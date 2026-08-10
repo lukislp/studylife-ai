@@ -37,6 +37,21 @@ Log of notable decisions: what was decided, alternatives considered, and why. Ma
 - **Decision:** `LICENSE` is AGPL-3.0, matching the main [StudyLife](https://github.com/lukislp/studylife) repo (copyright: Lukas Koerber, 2026). Replaces the unfilled GPL-3.0 template GitHub had created by default when the `studylife-ai` repo was set up.
 - **Why:** User's call — consistency with the main platform's license.
 
+### 2026-08-10 — Default local model: `ollama/llama3.2` **[owner: assistant]**
+- **Decision:** Switched the default `LLM_MODEL` from `ollama/llama3.1` to `ollama/llama3.2` (README, `.env.example`, `docker-compose.yml`, `config.py`).
+- **Why:** Newer small Ollama model, same class of hardware requirements; no reason to default to the older one. Purely a friendlier out-of-the-box default — any model/provider is still swappable via `LLM_MODEL`.
+
+### 2026-08-10 — CI badge in README **[owner: assistant]**
+- **Decision:** Added a GitHub Actions CI status badge to the top of README.md, linking to the workflow.
+- **Why:** Makes CI status visible at a glance instead of requiring a trip to the Actions tab; standard practice for a portfolio repo. Confirmed via the GitHub Actions API that the M1 commit's CI run (`run_number: 1`) completed with `conclusion: success` before adding the badge — an unverified badge would be worse than none.
+
+## M2 — Ingestion architecture (planning, ahead of implementation)
+
+### 2026-08-10 — Ingestion reads via the StudyLife REST API, not direct DB access **[owner: user]**
+- **Decision:** The M2 ingestion worker will call the StudyLife REST API to pull notes/courses/calendar data, rather than reading the StudyLife database directly as originally specified in CLAUDE.md's architecture table ("Ingestion: Python-Worker, liest Notizen aus der StudyLife-DB").
+- **Alternatives:** Direct DB access (original CLAUDE.md spec) — faster, no extra HTTP hop, but couples `studylife-ai` to StudyLife's internal schema and bypasses its access-control logic; breaks silently on StudyLife schema migrations.
+- **Why:** Decoupling from the internal schema and reusing StudyLife's existing access logic/auth outweighs the minor performance cost of going through the API. This overrides the CLAUDE.md architecture table — flagged as a deliberate architecture change, not a silent one.
+- **Follow-up:** CLAUDE.md's architecture table should be updated to reflect this once M2 concretely starts. Concrete API shape (notes endpoint, incremental-sync support, auth scheme) still being investigated against the StudyLife source at `C:\Users\koerb\OneDrive\Documentos\Code\repos\studylife\studylife`.
+
 ### Open questions for later milestones
-- StudyLife API: base URL, auth (bearer/API key/other), relevant endpoints for notes/sessions/calendar/timers — needed by M4, and possibly M2 if ingestion turns out to go through the API rather than direct DB access.
-- Whether ingestion (M2) reads the StudyLife DB directly (as currently specified in CLAUDE.md) or via API — direct DB access requires connection details/schema.
+- StudyLife API: concrete notes/sessions/calendar endpoints, incremental-sync support (e.g. updated-since filtering), and auth scheme — being investigated directly against the StudyLife source now that the ingestion-via-API decision is made.

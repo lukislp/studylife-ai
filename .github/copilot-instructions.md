@@ -34,7 +34,7 @@ LLM	Provider-agnostisch über LiteLLM; API-Modelle + lokal via Ollama
 
 Vektor-DB	Qdrant (Container)
 
-Ingestion	Python-Worker, liest Notizen aus der StudyLife-DB, inkrementelle Updates
+Ingestion	Python-Worker, liest Notizen über die StudyLife-REST-API (nicht direkter DB-Zugriff — Entscheidung vom 2026-08-10, siehe docs/decisions.md), inkrementelle Updates
 
 Evaluation	RAGAS + eigenes Eval-Set (JSONL, versioniert)
 
