@@ -23,6 +23,17 @@ class NoteChunkMetadata:
     fingerprint: str
 
 
+@dataclass
+class RetrievedChunk:
+    note_id: int
+    chunk_index: int
+    content: str
+    title: str
+    course_id: int | None
+    session_id: int | None
+    score: float
+
+
 class QdrantStore:
     def __init__(self, *, url: str, collection: str) -> None:
         # check_compatibility=False: skip the server-version handshake on
@@ -97,6 +108,35 @@ class QdrantStore:
             for index, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
         ]
         await self._client.upsert(collection_name=self._collection, points=points)
+
+    async def search(
+        self, *, vector: list[float], user_id: str, limit: int
+    ) -> list[RetrievedChunk]:
+        """Vector search scoped to a single user (see docs/decisions.md "Retrieval design")."""
+        if not await self.collection_exists():
+            return []
+        response = await self._client.query_points(
+            collection_name=self._collection,
+            query=vector,
+            query_filter=models.Filter(
+                must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))]
+            ),
+            limit=limit,
+            with_payload=True,
+        )
+        return [
+            RetrievedChunk(
+                note_id=point.payload["note_id"],
+                chunk_index=point.payload["chunk_index"],
+                content=point.payload["content"],
+                title=point.payload["title"],
+                course_id=point.payload["course_id"],
+                session_id=point.payload["session_id"],
+                score=point.score,
+            )
+            for point in response.points
+            if point.payload is not None
+        ]
 
     async def delete_note(self, note_id: int) -> None:
         """No-op if the collection doesn't exist yet — nothing to delete."""

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from studylife_ai.ingestion.qdrant_store import NoteChunkMetadata, QdrantStore
+from studylife_ai.ingestion.qdrant_store import NoteChunkMetadata, QdrantStore, RetrievedChunk
 
 
 def _make_store() -> QdrantStore:
@@ -130,3 +130,51 @@ async def test_delete_note_is_noop_when_collection_missing() -> None:
     await store.delete_note(42)
 
     store._client.delete.assert_not_awaited()
+
+
+async def test_search_returns_empty_when_collection_missing() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=False)
+
+    result = await store.search(vector=[0.1, 0.2], user_id="primary", limit=5)
+
+    assert result == []
+
+
+async def test_search_filters_by_user_id_and_maps_results() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    fake_point = SimpleNamespace(
+        score=0.87,
+        payload={
+            "note_id": 7,
+            "chunk_index": 1,
+            "content": "Eigenvalues are important.",
+            "title": "Linear Algebra",
+            "course_id": 3,
+            "session_id": None,
+            "user_id": "primary",
+            "fingerprint": "hash123",
+        },
+    )
+    store._client.query_points = AsyncMock(return_value=SimpleNamespace(points=[fake_point]))
+
+    result = await store.search(vector=[0.1, 0.2], user_id="primary", limit=5)
+
+    assert result == [
+        RetrievedChunk(
+            note_id=7,
+            chunk_index=1,
+            content="Eigenvalues are important.",
+            title="Linear Algebra",
+            course_id=3,
+            session_id=None,
+            score=0.87,
+        )
+    ]
+    _, kwargs = store._client.query_points.call_args
+    assert kwargs["query"] == [0.1, 0.2]
+    assert kwargs["limit"] == 5
+    condition = kwargs["query_filter"].must[0]
+    assert condition.key == "user_id"
+    assert condition.match.value == "primary"
