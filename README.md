@@ -129,14 +129,14 @@ There's no scheduler yet — run it manually or via your own cron for now; recur
 
 RAGAS-based eval, replaying [`eval/dataset.jsonl`](eval/dataset.jsonl) (12 cases) through the real retrieval + generation pipeline: `uv run python -m studylife_ai.eval`. Requires `EVAL_JUDGE_MODEL` (a model independent of `LLM_MODEL`, see [Configuration](#configuration)) — currently `openai/gpt-4o-mini`.
 
-Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising. First manual baseline run, 2026-08-11:
+Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising. First clean baseline run, against the real dev note corpus, 2026-08-11:
 
 | Metric | Score |
 | --- | --- |
-| Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) |
-| Faithfulness | 0.82 |
-| Context Precision (`LLMContextPrecisionWithoutReference`) | 0.50 |
-| Answer Relevancy | TODO — this run's scores came back `NaN`: the judge (`gpt-4o-mini`) hit our OpenAI account's daily request-rate limit partway through, since this metric alone issues several LLM calls per case. Re-run pending quota reset. |
+| Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) — the one miss is a broad, multi-note question retrieval doesn't fully cover at `top_k=5`, a real retrieval-design data point |
+| Faithfulness | 0.80 |
+| Answer Relevancy | 0.88 |
+| Context Precision (`LLMContextPrecisionWithoutReference`) | 0.58 |
 
 These are the first real numbers; no CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
 
