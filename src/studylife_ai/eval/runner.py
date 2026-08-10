@@ -9,11 +9,12 @@ the provider choice is deliberately not made yet.
 
 from dataclasses import dataclass, field
 
+import litellm
 import pandas as pd
 from langchain_community.chat_models import ChatLiteLLM
 from ragas import EvaluationDataset, evaluate
 from ragas.dataset_schema import EvaluationResult, MultiTurnSample, SingleTurnSample
-from ragas.embeddings.litellm_provider import LiteLLMEmbeddings
+from ragas.embeddings.base import BaseRagasEmbeddings
 from ragas.llms.base import BaseRagasLLM, LangchainLLMWrapper
 from ragas.metrics import AnswerRelevancy, Faithfulness, LLMContextPrecisionWithoutReference
 
@@ -81,7 +82,41 @@ async def _generate_answer(
     return "".join(deltas), chunks
 
 
-def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, LiteLLMEmbeddings]:
+class _JudgeEmbeddings(BaseRagasEmbeddings):
+    """Minimal BaseRagasEmbeddings adapter over LiteLLM's embedding call.
+
+    Not ragas' own LiteLLMEmbeddings (ragas.embeddings.litellm_provider): that
+    class implements the newer embed_text/embed_texts interface, not
+    BaseRagasEmbeddings' embed_query/embed_documents - AnswerRelevancy (a
+    legacy metric) calls .embed_query() and fails with AttributeError against
+    it. Confirmed by inspecting both classes directly, same mismatch as
+    llm_factory() vs BaseRagasLLM above.
+    """
+
+    def __init__(self, model: str) -> None:
+        super().__init__()
+        self._model = model
+
+    def embed_query(self, text: str) -> list[float]:
+        response = litellm.embedding(model=self._model, input=[text])
+        return list(response.data[0]["embedding"])
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        response = litellm.embedding(model=self._model, input=texts)
+        ordered = sorted(response.data, key=lambda item: item["index"])
+        return [item["embedding"] for item in ordered]
+
+    async def aembed_query(self, text: str) -> list[float]:
+        response = await litellm.aembedding(model=self._model, input=[text])
+        return list(response.data[0]["embedding"])
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        response = await litellm.aembedding(model=self._model, input=texts)
+        ordered = sorted(response.data, key=lambda item: item["index"])
+        return [item["embedding"] for item in ordered]
+
+
+def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, BaseRagasEmbeddings]:
     if not settings.eval_judge_model:
         raise RuntimeError(
             "EVAL_JUDGE_MODEL must be set to run the eval - a judge model "
@@ -92,10 +127,11 @@ def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, LiteLLMEmbeddings]:
     # here (Faithfulness, AnswerRelevancy, ContextPrecision) expect a BaseRagasLLM
     # (.agenerate_text), which llm_factory()'s InstructorBaseRagasLLM does not
     # implement (.agenerate only) - confirmed by inspecting both classes directly.
-    judge_llm = LangchainLLMWrapper(ChatLiteLLM(model=settings.eval_judge_model))
-    judge_embeddings = LiteLLMEmbeddings(
-        model=settings.embedding_model, api_base=settings.llm_api_base
-    )
+    # bypass_n=True: ChatLiteLLM's n= support silently returned 1 generation
+    # instead of the requested 3 for statement-generation robustness; bypass_n
+    # makes ragas issue n separate calls instead of relying on that.
+    judge_llm = LangchainLLMWrapper(ChatLiteLLM(model=settings.eval_judge_model), bypass_n=True)
+    judge_embeddings = _JudgeEmbeddings(model=settings.embedding_model)
     return judge_llm, judge_embeddings
 
 
