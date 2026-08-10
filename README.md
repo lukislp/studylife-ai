@@ -136,6 +136,7 @@ No eval pipeline yet — planned for M3 (RAGAS + a versioned eval set). Results 
 - [ ] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
+- [ ] **Backlog** — ingest courses and calendar/session data too (currently notes only), so the RAG assistant reaches the full "notes, courses, calendar" coverage described above. Chunking/retrieval/prompt pipeline is generic over content type, so this should extend the existing M2 pieces rather than redesign them.
 
 ## Tech stack
 
