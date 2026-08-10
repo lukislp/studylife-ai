@@ -96,13 +96,14 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
 | `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. Required for ingestion. |
-| `STUDYLIFE_API_KEY`            | _(unset)_                 | StudyLife's non-interactive API key (Settings → API key for integrations, after a passkey login). Required for ingestion. |
+| `STUDYLIFE_API_KEY`            | _(unset)_                 | StudyLife's non-interactive API key, dedicated to studylife-ai (Settings → "studylife-ai connection" card, after a passkey login). Required for ingestion. |
 | `STUDYLIFE_USER_ID`            | `primary`                 | Arbitrary label stored on ingested chunks, not a StudyLife-internal ID — see [docs/decisions.md](docs/decisions.md). |
 | `EMBEDDING_MODEL`              | `ollama/nomic-embed-text` | LiteLLM embedding model identifier, same provider convention as `LLM_MODEL`. |
 | `QDRANT_URL`                   | `http://localhost:6333`  | Qdrant connection URL.                                                      |
 | `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for note chunks.                                     |
 | `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
+| `RETRIEVAL_TOP_K`              | `5`                       | Number of chunks retrieved per query (fixed top-k, v1 — see [docs/decisions.md](docs/decisions.md)). |
 
 ## API
 
