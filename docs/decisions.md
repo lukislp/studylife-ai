@@ -45,6 +45,10 @@ Log of notable decisions: what was decided, alternatives considered, and why. Ma
 - **Decision:** Added a GitHub Actions CI status badge to the top of README.md, linking to the workflow.
 - **Why:** Makes CI status visible at a glance instead of requiring a trip to the Actions tab; standard practice for a portfolio repo. Confirmed via the GitHub Actions API that the M1 commit's CI run (`run_number: 1`) completed with `conclusion: success` before adding the badge — an unverified badge would be worse than none.
 
+### 2026-08-10 — Badge row matches the main StudyLife repo's style, minus fabricated metrics **[owner: assistant]**
+- **Decision:** Added License (AGPL-3.0) and Python-version badges alongside the CI badge, mirroring the badge row style used in the main [StudyLife](https://github.com/lukislp/studylife) README (which has CI/CD, Release, License, .NET-version, and Coverage badges).
+- **Why:** Deliberately did *not* add a Release badge (no tags/release process exist yet in this repo) or a Coverage badge (no coverage measurement wired into CI yet) — both would render as empty/misleading or effectively fabricate a metric, which CLAUDE.md explicitly forbids. Add them once the underlying capability (semantic-release/tags, `pytest --cov` + a coverage badge job) actually exists, not just for visual parity.
+
 ## M2 — Ingestion architecture (planning, ahead of implementation)
 
 ### 2026-08-10 — Ingestion reads via the StudyLife REST API, not direct DB access **[owner: user]**
