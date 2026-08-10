@@ -22,3 +22,11 @@ class ChatRequest(BaseModel):
 
     messages: list[ChatMessage] = Field(min_length=1)
     model: str | None = None
+
+
+class NoteSource(BaseModel):
+    """One entry of the SSE `sources` event: a note that was retrieved for RAG context."""
+
+    note_id: int
+    title: str
+    course_id: int | None = None
