@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     # pure vector search, no reranking, user_id-only filter.
     retrieval_top_k: int = 5
 
+    # RAGAS eval judge (M3, see docs/decisions.md "Eval design"): a LiteLLM
+    # model string, deliberately independent of llm_model. No default -
+    # running the eval should fail loudly rather than silently falling back
+    # to the answer model as its own judge (rejected as unreliable during
+    # that decision). Set to "openai/gpt-4o-mini" in .env.
+    eval_judge_model: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

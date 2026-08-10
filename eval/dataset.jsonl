@@ -1,0 +1,12 @@
+{"id": "eigenwerte-basic", "question": "Wie bestimme ich Eigenwerte einer Matrix?", "expected_note_titles": ["Merkzettel Eigenwerte"], "category": "basic"}
+{"id": "matrix-multiplikation", "question": "Wie multipliziert man zwei Matrizen?", "expected_note_titles": ["Matrizenmultiplikation"], "category": "precision-same-course"}
+{"id": "lgs-loesen", "question": "Wie löse ich ein lineares Gleichungssystem?", "expected_note_titles": ["Lineare Gleichungssysteme lösen"], "category": "precision-same-course"}
+{"id": "erwartungswert-varianz", "question": "Wie berechne ich Erwartungswert und Varianz?", "expected_note_titles": ["Erwartungswert und Varianz"], "category": "basic"}
+{"id": "hypothesentest-ablauf", "question": "Wie läuft ein Hypothesentest ab?", "expected_note_titles": ["Hypothesentests Ablauf"], "category": "precision-cross-course"}
+{"id": "ableitungsregeln", "question": "Wie leite ich eine verkettete Funktion ab?", "expected_note_titles": ["Ableitungsregeln"], "category": "precision-cross-course"}
+{"id": "suchalgorithmen", "question": "Was ist der Unterschied zwischen BFS und A*?", "expected_note_titles": ["Suchalgorithmen Übersicht"], "category": "basic"}
+{"id": "list-comprehension", "question": "Wie schreibe ich eine List Comprehension in Python?", "expected_note_titles": ["List Comprehensions"], "category": "basic"}
+{"id": "statistik-breit", "question": "Was habe ich zur Statistik notiert?", "expected_note_titles": ["Erwartungswert und Varianz", "Hypothesentests Ablauf"], "category": "multi-hit"}
+{"id": "cloud-kein-treffer", "question": "Was ist der Unterschied zwischen IaaS und PaaS?", "expected_note_titles": [], "category": "no-match"}
+{"id": "tutor-frage", "question": "Was wollte ich meinen Tutor fragen?", "expected_note_titles": ["Fragen an Tutor"], "category": "basic"}
+{"id": "bfs-dfs-english", "question": "What's the difference between BFS and DFS?", "expected_note_titles": ["Suchalgorithmen Übersicht"], "category": "cross-lingual"}
