@@ -21,10 +21,10 @@ class Settings(BaseSettings):
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
 
-    # LiteLLM model identifier, e.g. "openai/gpt-4o-mini" or "ollama/llama3.1".
+    # LiteLLM model identifier, e.g. "openai/gpt-4o-mini" or "ollama/llama3.2".
     # Defaults to a local Ollama model so the service runs without an API key
     # out of the box via `docker compose up`.
-    llm_model: str = "ollama/llama3.1"
+    llm_model: str = "ollama/llama3.2"
     llm_api_base: str | None = "http://localhost:11434"
     llm_request_timeout_seconds: float = 60.0
 

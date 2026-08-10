@@ -23,7 +23,7 @@ services:
       - qdrant_storage:/qdrant/storage
 
   # Local model runtime — lets /chat work with zero API keys out of the box.
-  # Pull a model once via: docker compose exec ollama ollama pull llama3.1
+  # Pull a model once via: docker compose exec ollama ollama pull llama3.2
   ollama:
     image: ollama/ollama:latest
     ports:
