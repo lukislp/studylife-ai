@@ -104,6 +104,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
 | `RETRIEVAL_TOP_K`              | `5`                       | Number of chunks retrieved per query (fixed top-k, v1 — see [docs/decisions.md](docs/decisions.md)). |
+| `EVAL_JUDGE_MODEL`             | _(unset)_                 | LiteLLM model identifier for the RAGAS eval judge, deliberately independent of `LLM_MODEL` — see [Evaluation](#evaluation). Required to run `python -m studylife_ai.eval`. |
 
 ## API
 
@@ -126,7 +127,18 @@ There's no scheduler yet — run it manually or via your own cron for now; recur
 
 ## Evaluation
 
-No eval pipeline yet — planned for M3 (RAGAS + a versioned eval set). Results will be published here once measured; no numbers are fabricated in the meantime.
+RAGAS-based eval, replaying [`eval/dataset.jsonl`](eval/dataset.jsonl) (12 cases) through the real retrieval + generation pipeline: `uv run python -m studylife_ai.eval`. Requires `EVAL_JUDGE_MODEL` (a model independent of `LLM_MODEL`, see [Configuration](#configuration)) — currently `openai/gpt-4o-mini`.
+
+Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising. First manual baseline run, 2026-08-11:
+
+| Metric | Score |
+| --- | --- |
+| Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) |
+| Faithfulness | 0.82 |
+| Context Precision (`LLMContextPrecisionWithoutReference`) | 0.50 |
+| Answer Relevancy | TODO — this run's scores came back `NaN`: the judge (`gpt-4o-mini`) hit our OpenAI account's daily request-rate limit partway through, since this metric alone issues several LLM calls per case. Re-run pending quota reset. |
+
+These are the first real numbers; no CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
 
 ## Roadmap
 
