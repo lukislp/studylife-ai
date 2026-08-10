@@ -28,6 +28,26 @@ class Settings(BaseSettings):
     llm_api_base: str | None = "http://localhost:11434"
     llm_request_timeout_seconds: float = 60.0
 
+    # StudyLife REST API (ingestion source, M2). No default base URL/key —
+    # ingestion fails loudly if unset rather than silently pointing nowhere.
+    studylife_api_base_url: str | None = None
+    studylife_api_key: str | None = None
+    # Label for the single StudyLife user this instance ingests for. Not a
+    # StudyLife-internal ID (the API doesn't expose one) — just a stable tag
+    # stored on every Qdrant chunk so a future multi-user setup doesn't need
+    # to re-ingest everything to add user scoping.
+    studylife_user_id: str = "primary"
+
+    # LiteLLM embedding model identifier, same provider-agnostic convention
+    # as llm_model. Defaults to a local Ollama embedding model.
+    embedding_model: str = "ollama/nomic-embed-text"
+
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "studylife_notes"
+
+    chunk_size_tokens: int = 500
+    chunk_overlap_tokens: int = 75
+
 
 @lru_cache
 def get_settings() -> Settings:

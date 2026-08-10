@@ -6,15 +6,16 @@ services:
     env_file:
       - .env
     environment:
-      # Inside the compose network, Ollama is reachable by service name,
-      # not localhost — overrides the .env default for container-to-container calls.
+      # Inside the compose network, Ollama/Qdrant are reachable by service
+      # name, not localhost — overrides the .env defaults for
+      # container-to-container calls.
       LLM_API_BASE: http://ollama:11434
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       - qdrant
       - ollama
 
-  # Vector DB — unused until M2 (RAG ingestion), started here so the local
-  # dev environment is consistent from day one.
+  # Vector DB for note embeddings (M2 ingestion + RAG retrieval).
   qdrant:
     image: qdrant/qdrant:latest
     ports:
@@ -22,8 +23,10 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
-  # Local model runtime — lets /chat work with zero API keys out of the box.
-  # Pull a model once via: docker compose exec ollama ollama pull llama3.2
+  # Local model runtime — lets /chat and ingestion work with zero API keys
+  # out of the box. Pull models once via:
+  #   docker compose exec ollama ollama pull llama3.2
+  #   docker compose exec ollama ollama pull nomic-embed-text
   ollama:
     image: ollama/ollama:latest
     ports:
