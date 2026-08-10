@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     chunk_size_tokens: int = 500
     chunk_overlap_tokens: int = 75
 
+    # Retrieval v1 (see docs/decisions.md "Retrieval design"): fixed top-k,
+    # pure vector search, no reranking, user_id-only filter.
+    retrieval_top_k: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:
