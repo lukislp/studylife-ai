@@ -22,6 +22,15 @@ dev-dependencies = [
     "ruff>=0.7",
     "mypy>=1.13",
     "pre-commit>=4.0",
+    "ragas>=0.3,<0.4",  # 0.4.3 has a broken import (langchain_community.chat_models.vertexai
+    # was removed upstream) - github.com/explodinggradients/ragas/issues/2745
+    "langchain-community<0.4",  # ragas 0.3.x's own base.py still does an unconditional
+    # `from langchain_community.chat_models.vertexai import ChatVertexAI` - that submodule
+    # was removed in langchain-community 0.4.x (split into langchain-google-vertexai);
+    # pinning below 0.4 keeps the file ragas expects, without adding an unused GCP dependency.
+    # Also used directly in eval/runner.py: ChatLiteLLM wraps our judge model for
+    # ragas' LangchainLLMWrapper - the legacy metrics need a BaseRagasLLM, which
+    # ragas' own newer llm_factory() does not produce (see runner.py for detail).
 ]
 
 [build-system]
@@ -58,6 +67,10 @@ explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = "litellm.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pandas.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
