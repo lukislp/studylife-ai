@@ -13,6 +13,14 @@ dependencies = [
     "httpx>=0.27",
     "qdrant-client>=1.12",
     "tiktoken>=0.8",
+    # M4 agent (see docs/decisions.md "M4 agent stack"): create_react_agent
+    # is deprecated in current LangGraph - create_agent + HumanInTheLoopMiddleware
+    # (from the langchain package, not langgraph alone) is the current way to
+    # pause a graph before a write-tool executes.
+    "langgraph>=1.2",
+    "langchain>=1.3",
+    "langchain-litellm>=0.7",
+    "langgraph-checkpoint-sqlite>=3.1",
 ]
 
 [tool.uv]
