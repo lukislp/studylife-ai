@@ -3,7 +3,18 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class IngestionUser(BaseModel):
+    """One StudyLife account the ingestion worker syncs (see docs/decisions.md
+    "M4.5 Multi-user support" - a static, manually-maintained list rather than
+    a privileged "list all users" StudyLife endpoint). `user_id` is the real
+    StudyLife-internal AuthUserId, used as the Qdrant partition key."""
+
+    user_id: str
+    ai_api_key: str
 
 
 class Settings(BaseSettings):
@@ -28,15 +39,17 @@ class Settings(BaseSettings):
     llm_api_base: str | None = "http://localhost:11434"
     llm_request_timeout_seconds: float = 60.0
 
-    # StudyLife REST API (ingestion source, M2). No default base URL/key —
-    # ingestion fails loudly if unset rather than silently pointing nowhere.
+    # StudyLife REST API. One shared instance URL for all users (see
+    # docs/decisions.md "M4.5 Multi-user support") — no default, ingestion
+    # and /chat/agent fail loudly if unset rather than silently pointing
+    # nowhere.
     studylife_api_base_url: str | None = None
-    studylife_api_key: str | None = None
-    # Label for the single StudyLife user this instance ingests for. Not a
-    # StudyLife-internal ID (the API doesn't expose one) — just a stable tag
-    # stored on every Qdrant chunk so a future multi-user setup doesn't need
-    # to re-ingest everything to add user scoping.
-    studylife_user_id: str = "primary"
+    # Accounts the ingestion worker syncs, one entry per StudyLife user (see
+    # IngestionUser above). JSON list in the env var, e.g.
+    # INGESTION_USERS=[{"user_id": "1", "ai_api_key": "..."}]. /chat and
+    # /agent get their identity from per-request headers instead (see
+    # api/identity.py), not from this list.
+    ingestion_users: list[IngestionUser] = []
     # Lookback window for GET /api/sessions/history (see docs/decisions.md
     # "Ingestion scope expansion"). ~5 years, measured from "now" every sync
     # run - it IS a rolling window: a session older than this eventually
@@ -92,6 +105,11 @@ class Settings(BaseSettings):
     # to the answer model as its own judge (rejected as unreliable during
     # that decision). Set to "openai/gpt-4o-mini" in .env.
     eval_judge_model: str | None = None
+    # Fixed Qdrant partition the eval pipeline reads/writes under (fixture
+    # seeding + real dev-corpus runs) - decoupled from any real StudyLife
+    # user id, since eval doesn't go through the per-request identity flow
+    # /chat and /agent use.
+    eval_user_id: str = "eval-user"
 
     # M4 agent (see docs/decisions.md "M4 agent stack"): SQLite file backing
     # the LangGraph checkpointer that holds a proposed-but-not-yet-confirmed

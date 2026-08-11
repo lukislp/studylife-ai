@@ -67,6 +67,12 @@ select = [
 [tool.ruff.lint.isort]
 known-first-party = ["studylife_ai"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom is exactly `param: T = Depends(...)` -
+# B008 (no function calls in argument defaults) would otherwise flag every
+# use of it; this is the standard allowlist FastAPI's own docs recommend.
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
