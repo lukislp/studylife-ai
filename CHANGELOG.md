@@ -1,3 +1,11 @@
+## [1.2.2](https://github.com/lukislp/studylife-ai/compare/v1.2.1...v1.2.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **agent:** ask for clarification instead of guessing between ambiguous courses ([ac26f6c](https://github.com/lukislp/studylife-ai/commit/ac26f6c3da0ba7c7ac1949c47dd7b920f5167c7b))
+* **docker:** stop local dev container from breaking on API-provider LLMs ([1bbb62a](https://github.com/lukislp/studylife-ai/commit/1bbb62accb330de0db17e2558a1b32a564579a58))
+
 ## [1.2.1](https://github.com/lukislp/studylife-ai/compare/v1.2.0...v1.2.1) (2026-08-11)
 
 
