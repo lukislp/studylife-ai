@@ -1,3 +1,15 @@
+# [1.3.0](https://github.com/lukislp/studylife-ai/compare/v1.2.2...v1.3.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** raise retrieval_top_k from 5 to 8 ([790d122](https://github.com/lukislp/studylife-ai/commit/790d1223f9263862ef5e5925e35dbaef3bbb4550))
+
+
+### Features
+
+* **ingestion:** re-sync every registered account every 60 seconds ([4b52f62](https://github.com/lukislp/studylife-ai/commit/4b52f62610f2944e83e7a6bddde8c5145eb1c341))
+
 ## [1.2.2](https://github.com/lukislp/studylife-ai/compare/v1.2.1...v1.2.2) (2026-08-11)
 
 
