@@ -1,3 +1,15 @@
+# [1.1.0](https://github.com/lukislp/studylife-ai/compare/v1.0.3...v1.1.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **ci:** serialize the whole workflow run, not just the release chain ([b26939b](https://github.com/lukislp/studylife-ai/commit/b26939bdad884fd8605ae86b5949428a2e3ae030))
+
+
+### Features
+
+* **api:** auto-sync a user's notes right after key registration ([ac6c467](https://github.com/lukislp/studylife-ai/commit/ac6c4670560a420c36d79436670f32c3c342d3ee))
+
 ## [1.0.3](https://github.com/lukislp/studylife-ai/compare/v1.0.2...v1.0.3) (2026-08-11)
 
 
