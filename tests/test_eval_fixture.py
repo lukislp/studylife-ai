@@ -15,7 +15,7 @@ def _settings(**overrides: object) -> Settings:
         "chunk_overlap_tokens": 75,
         "qdrant_url": "http://qdrant.test:6333",
         "qdrant_collection": "studylife_notes",
-        "studylife_user_id": "primary",
+        "eval_user_id": "eval-user",
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -61,4 +61,4 @@ async def test_seed_fixture_notes_chunks_embeds_and_upserts_each_note(
     assert kwargs["metadata"].entity_id == 1
     assert kwargs["metadata"].title == "Eigenwerte"
     assert kwargs["metadata"].course_id == 6
-    assert kwargs["metadata"].user_id == "primary"
+    assert kwargs["metadata"].user_id == "eval-user"

@@ -62,7 +62,9 @@ async def _generate_answer(
 ) -> tuple[str, list[RetrievedChunk]]:
     """Same retrieval + prompt-construction + generation as /chat, but returns
     the full joined answer instead of an SSE stream."""
-    chunks = await retrieve_with_rerank(question, store=store, settings=settings)
+    chunks = await retrieve_with_rerank(
+        question, store=store, settings=settings, user_id=settings.eval_user_id
+    )
     context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
     messages = [context_message, ChatMessage(role="user", content=question)]
     deltas = [

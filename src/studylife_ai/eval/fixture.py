@@ -53,7 +53,7 @@ async def seed_fixture_notes(
                 title=note.title,
                 course_id=note.course_id,
                 session_id=None,
-                user_id=settings.studylife_user_id,
+                user_id=settings.eval_user_id,
                 fingerprint="fixture",
             ),
         )

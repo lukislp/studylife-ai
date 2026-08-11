@@ -19,7 +19,7 @@ def _settings(**overrides: object) -> Settings:
         "llm_api_base": "http://ollama.test:11434",
         "llm_request_timeout_seconds": 30.0,
         "embedding_model": "ollama/nomic-embed-text",
-        "studylife_user_id": "primary",
+        "eval_user_id": "eval-user",
         "retrieval_top_k": 5,
         "eval_judge_model": "openai/gpt-4o-mini",
     }
@@ -87,11 +87,11 @@ async def test_generate_answer_retrieves_context_and_joins_streamed_deltas(
     chunk = _chunk(1, "Eigenwerte", "det(A - λI) = 0")
 
     async def fake_retrieve_with_rerank(
-        query: str, *, store: object, settings: Settings
+        query: str, *, store: object, settings: Settings, user_id: str
     ) -> list[RetrievedChunk]:
         assert query == "Was sind Eigenwerte?"
         assert settings.embedding_model == "ollama/nomic-embed-text"
-        assert settings.studylife_user_id == "primary"
+        assert user_id == "eval-user"
         assert settings.retrieval_top_k == 5
         return [chunk]
 
