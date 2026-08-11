@@ -7,6 +7,10 @@ the paused LangGraph run by its `thread_id`.
 Multi-user (see docs/decisions.md "M4.5 Multi-user support"): the agent
 graph is rebuilt fresh per request from the calling user's own
 `StudyLifeClient`, not shared across users via a single startup-built graph.
+The resolved proxy-token identity only proves *who is asking* - it is not
+itself usable against StudyLife's own `/api/*` gate, so the real `AiApiKey`
+for that user is looked up from `studylife.registered_keys.RegisteredKeyStore`
+(populated by StudyLife's registration callback, see docs/decisions.md).
 `thread_id` embeds the owning `user_id` (`f"{user_id}:{uuid4()}"`), and
 `POST /agent/confirm` rejects with 403 if the caller's own resolved
 `user_id` doesn't match the thread_id's prefix - before the checkpointer is
@@ -24,7 +28,7 @@ from langgraph.types import Command
 
 from studylife_ai.agent.graph import build_agent
 from studylife_ai.agent.tools import build_tools
-from studylife_ai.api.identity import ResolvedIdentity, resolve_identity, verify_identity
+from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
 from studylife_ai.config import get_settings
 from studylife_ai.schemas.agent import AgentRequest, AgentResponse, ConfirmRequest, PendingAction
 from studylife_ai.studylife.client import StudyLifeClient
@@ -34,6 +38,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["agent"])
 
 _NOT_CONFIGURED_DETAIL = "Agent not available - STUDYLIFE_API_BASE_URL must be set."
+_NO_KEY_REGISTERED_DETAIL = (
+    "No AiApiKey registered for this user - generate one in StudyLife's settings first."
+)
+
+
+async def _studylife_client_for(
+    http_request: Request, identity: ResolvedIdentity
+) -> StudyLifeClient:
+    settings = get_settings()
+    if not settings.studylife_api_base_url:
+        raise HTTPException(status_code=503, detail=_NOT_CONFIGURED_DETAIL)
+    ai_api_key = await http_request.app.state.registered_key_store.get(identity.user_id)
+    if ai_api_key is None:
+        raise HTTPException(status_code=404, detail=_NO_KEY_REGISTERED_DETAIL)
+    return StudyLifeClient(base_url=settings.studylife_api_base_url, api_key=ai_api_key)
 
 
 def _build_agent(
@@ -107,15 +126,9 @@ async def run_agent(
     http_request: Request,
     identity: ResolvedIdentity = Depends(resolve_identity),
 ) -> AgentResponse:
-    settings = get_settings()
-    if not settings.studylife_api_base_url:
-        raise HTTPException(status_code=503, detail=_NOT_CONFIGURED_DETAIL)
-
     thread_id = f"{identity.user_id}:{uuid.uuid4()}"
-    async with StudyLifeClient(
-        base_url=settings.studylife_api_base_url, api_key=identity.ai_api_key
-    ) as studylife_client:
-        await verify_identity(studylife_client)
+    studylife_client = await _studylife_client_for(http_request, identity)
+    async with studylife_client:
         compiled_agent = _build_agent(http_request, identity, studylife_client)
         # The model has no other way to know "today" - without this, relative
         # dates ("morgen", "nächste Woche") get resolved against training data
@@ -149,14 +162,8 @@ async def confirm_agent_action(
         # alone resumed, on a mismatch.
         raise HTTPException(status_code=403, detail="This action does not belong to you.")
 
-    settings = get_settings()
-    if not settings.studylife_api_base_url:
-        raise HTTPException(status_code=503, detail=_NOT_CONFIGURED_DETAIL)
-
-    async with StudyLifeClient(
-        base_url=settings.studylife_api_base_url, api_key=identity.ai_api_key
-    ) as studylife_client:
-        await verify_identity(studylife_client)
+    studylife_client = await _studylife_client_for(http_request, identity)
+    async with studylife_client:
         compiled_agent = _build_agent(http_request, identity, studylife_client)
         decision: dict[str, Any] = {"type": request.decision}
         if request.decision == "reject" and request.message:

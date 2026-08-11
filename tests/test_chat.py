@@ -2,14 +2,12 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from httpx import AsyncClient
 from pytest import MonkeyPatch
 
-from studylife_ai.config import Settings
+from studylife_ai.api.identity import PROXY_TOKEN_HEADER
 from studylife_ai.ingestion.qdrant_store import RetrievedChunk
-
-_NO_IDENTITY_HEADERS = {"X-StudyLife-User-Id": "", "X-StudyLife-Ai-Key": ""}
+from tests.conftest import TEST_SHARED_SECRET, make_proxy_token
 
 
 def _make_fake_stream(texts: list[str]) -> object:
@@ -127,42 +125,42 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
     }
 
 
-async def test_chat_returns_401_when_identity_headers_are_missing(
+async def test_chat_returns_401_when_proxy_token_header_is_missing(
     client: AsyncClient,
 ) -> None:
     response = await client.post(
         "/chat",
         json={"messages": [{"role": "user", "content": "Hi"}]},
-        headers=_NO_IDENTITY_HEADERS,
+        headers={PROXY_TOKEN_HEADER: ""},
     )
 
     assert response.status_code == 401
 
 
-async def test_chat_returns_401_when_ai_api_key_is_invalid(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+async def test_chat_returns_401_for_a_token_signed_with_the_wrong_secret(
+    client: AsyncClient,
 ) -> None:
-    async def fake_verify_identity(*args: object, **kwargs: object) -> None:
-        raise HTTPException(status_code=401, detail="Invalid AiApiKey.")
+    bad_token = make_proxy_token("test-user", secret="wrong-secret")
 
-    monkeypatch.setattr("studylife_ai.api.chat.verify_identity", fake_verify_identity)
-
-    response = await client.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
+    response = await client.post(
+        "/chat",
+        json={"messages": [{"role": "user", "content": "Hi"}]},
+        headers={PROXY_TOKEN_HEADER: bad_token},
+    )
 
     assert response.status_code == 401
 
 
-async def test_chat_returns_503_when_not_configured(
-    client: AsyncClient, monkeypatch: MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "studylife_ai.api.chat.get_settings",
-        lambda: Settings(studylife_api_base_url=None),  # type: ignore[arg-type]
+async def test_chat_returns_401_for_an_expired_token(client: AsyncClient) -> None:
+    expired_token = make_proxy_token("test-user", secret=TEST_SHARED_SECRET, expires_in=-60)
+
+    response = await client.post(
+        "/chat",
+        json={"messages": [{"role": "user", "content": "Hi"}]},
+        headers={PROXY_TOKEN_HEADER: expired_token},
     )
 
-    response = await client.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
-
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
 async def test_chat_falls_back_to_no_context_when_retrieval_fails(
