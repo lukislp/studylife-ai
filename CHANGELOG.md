@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/lukislp/studylife-ai/compare/v1.3.0...v1.3.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** reranker now checks date direction, not just proximity ([f727015](https://github.com/lukislp/studylife-ai/commit/f72701572fa1b81cedc8c46fedc29a2f649edcee))
+
 # [1.3.0](https://github.com/lukislp/studylife-ai/compare/v1.2.2...v1.3.0) (2026-08-11)
 
 
