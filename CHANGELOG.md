@@ -1,3 +1,11 @@
+## [1.1.1](https://github.com/lukislp/studylife-ai/compare/v1.1.0...v1.1.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **ci:** scope the release-chain concurrency group down from eval/trivy ([674da5e](https://github.com/lukislp/studylife-ai/commit/674da5e98174e0af916cf9a1773bf4192d8f255a))
+* **rag:** give /chat the same current-date grounding /agent already has ([835c27d](https://github.com/lukislp/studylife-ai/commit/835c27dadd27eb9a9ce797697b03cad7fb71924a))
+
 # [1.1.0](https://github.com/lukislp/studylife-ai/compare/v1.0.3...v1.1.0) (2026-08-11)
 
 
