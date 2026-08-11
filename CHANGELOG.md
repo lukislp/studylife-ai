@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/lukislp/studylife-ai/compare/v1.1.1...v1.1.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** ground the reranker in today's date for time-relative questions ([d6201e1](https://github.com/lukislp/studylife-ai/commit/d6201e12fbeb229616622c3efee1429ba07073ae))
+
 ## [1.1.1](https://github.com/lukislp/studylife-ai/compare/v1.1.0...v1.1.1) (2026-08-11)
 
 
