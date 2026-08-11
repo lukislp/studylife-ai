@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/lukislp/studylife-ai/compare/v1.1.3...v1.2.0) (2026-08-11)
+
+
+### Features
+
+* **eval:** add course/session/course_goal coverage to eval set ([a8af6d9](https://github.com/lukislp/studylife-ai/commit/a8af6d9cf41660ef8c35a8f21ab01a960a8cfe29))
+* **rag:** suggest Agent mode when no schedule match is found ([dc70766](https://github.com/lukislp/studylife-ai/commit/dc707666bd8c62f24421b7b57e6b3ca0a681675a))
+
 ## [1.1.3](https://github.com/lukislp/studylife-ai/compare/v1.1.2...v1.1.3) (2026-08-11)
 
 
