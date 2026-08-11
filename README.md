@@ -182,6 +182,16 @@ Context Precision is the metric this round of work targeted, and it improved sub
 
 No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
 
+## Observability
+
+Every LiteLLM call (`/chat`, `/agent`, reranking, retrieval-query embedding, ingestion embedding, and the eval judge) logs one structured line via `studylife_ai.llm.usage`, hooked in globally through LiteLLM's callback system (`llm/logging.py`) rather than threaded through each call site by hand:
+
+```
+llm_call call_site=chat model=gpt-4o-mini latency_ms=1281 prompt_tokens=153 completion_tokens=25 cost_usd=3.795e-05
+```
+
+`call_site` (`chat`, `agent`, `rerank`, `retrieval`, `ingestion`, `eval`, `eval-fixture`, `eval-judge`) is pure logging metadata passed to LiteLLM per call - it never reaches the model. `cost_usd` comes straight from LiteLLM's own price-map lookup (`0.0` for local Ollama models, since there's nothing to price). A failed call logs `llm_call_failed` at `WARNING` with the same fields plus the exception, instead of silently disappearing.
+
 ## Roadmap
 
 - [x] **M1** — Repo scaffold: FastAPI service with `/health` and streaming `/chat` (LiteLLM, no RAG), Docker + Compose, CI (lint + tests), README v1.
