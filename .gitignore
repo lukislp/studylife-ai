@@ -33,3 +33,6 @@ ollama_data/
 
 # M4 agent: local SQLite checkpointer for pending write-confirmation state
 agent_checkpoints.db*
+
+# M4.5: local SQLite store of registered per-user AiApiKeys
+registered_keys.db*
