@@ -1,0 +1,61 @@
+# Same strategy as studylife's own k8s/12-network-policies.yaml: default-deny ingress as a
+# baseline, egress stays open (LiteLLM needs to reach whichever API provider is configured,
+# without a fixed allowlist). Bootstrap-only, NOT Flux-managed - same RBAC reasoning as
+# k8s/00-namespace.yaml/k8s/02-secret.yaml (kustomize-controller's ClusterRole has no
+# "networkpolicies" permission).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: studylife-ai
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: studylife-ai
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - {} # egress otherwise unrestricted - this policy only adds an explicit DNS allowance
+---
+# studylife-scale has no default-deny egress (see that namespace's own k8s/12-network-
+# policies.yaml header comment), so studylife-web can already reach out cross-namespace by
+# default - this rule is the only side that needs to explicitly allow anything.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-studylife-web-to-app
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: studylife-ai } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: studylife-web } }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-qdrant
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: qdrant } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: studylife-ai } }
+      ports:
+        - { protocol: TCP, port: 6333 }

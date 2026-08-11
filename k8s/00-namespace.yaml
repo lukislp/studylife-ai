@@ -1,0 +1,25 @@
+# Dedicated namespace, isolated from studylife-scale (see docs/decisions.md "M5 - Deployment
+# design"). Pod Security Standards: "baseline" hard-enforced (no hostPath/hostNetwork/privileged
+# needed here either - PVCs/ConfigMap/Secret only), "restricted" as warn/audit only - the same
+# convention as studylife's own studylife-scale namespace.
+#
+# NOT applied via Flux: kustomize-controller's least-privilege ClusterRole (studylife repo's
+# k8s/flux/06-reconciler-rbac.yaml) grants no permission on the "namespaces" resource at all -
+# only Deployments/ConfigMaps/Services/PVCs. This file is bootstrap-only, applied once by hand
+# (kubectl apply -f k8s/00-namespace.yaml), matching studylife's own split between
+# Flux-reconciled app manifests and bootstrap-cluster.ps1-applied cluster-level resources.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: studylife-ai
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: studylife-ai
+automountServiceAccountToken: false

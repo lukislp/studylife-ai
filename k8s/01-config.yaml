@@ -1,0 +1,43 @@
+# Non-secret runtime configuration. Flux-managed (see k8s/flux-deploy/kustomization.yaml) -
+# kustomize-controller's ClusterRole (studylife repo's k8s/flux/06-reconciler-rbac.yaml) grants
+# it "configmaps" but deliberately NOT "secrets" - see k8s/02-secret.yaml for why that one stays
+# bootstrap-only.
+#
+# STUDYLIFE_API_BASE_URL is a placeholder (".invalid" TLD, same convention as studylife's own
+# bootstrap-cluster.ps1 hostname placeholders) - replace with the real StudyLife URL before
+# applying. Production runs the API-provider LLM/embedding path (no in-cluster Ollama - decided
+# for this milestone, see docs/decisions.md "M5 - Deployment design": Ollama on the cluster's
+# arm64/Raspberry-Pi-class hardware isn't practical, matching the same personal-.env override
+# already made for local dev). Only what the deployed service actually reads at runtime is
+# listed here - EVAL_JUDGE_MODEL/EVAL_USER_ID are CI-only (the eval CLI never runs in this
+# Deployment) and are deliberately omitted.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: studylife-ai-config
+  namespace: studylife-ai
+data:
+  APP_NAME: "StudyLife AI"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+
+  LLM_MODEL: "openai/gpt-4o-mini"
+  LLM_API_BASE: ""
+  LLM_REQUEST_TIMEOUT_SECONDS: "60"
+
+  STUDYLIFE_API_BASE_URL: "https://studylife.example.invalid"
+
+  EMBEDDING_MODEL: "openai/text-embedding-3-small"
+
+  QDRANT_URL: "http://qdrant:6333"
+  QDRANT_COLLECTION: "studylife_notes"
+
+  CHUNK_SIZE_TOKENS: "500"
+  CHUNK_OVERLAP_TOKENS: "75"
+
+  RETRIEVAL_TOP_K: "5"
+  RERANK_CANDIDATE_K: "20"
+  RERANK_MODEL: "openai/gpt-4o-mini"
+
+  REGISTERED_KEYS_DB_PATH: "/app/data/registered_keys.db"
+  AGENT_CHECKPOINT_DB_PATH: "/app/data/agent_checkpoints.db"

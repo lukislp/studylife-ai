@@ -1,0 +1,13 @@
+# Deliberately ONLY these two files - NOT the rest of k8s/. Mirrors studylife's own
+# k8s/flux/deploy/kustomization.yaml scoping, for the same underlying reason: kustomize-
+# controller's least-privilege ClusterRole (studylife repo's k8s/flux/06-reconciler-rbac.yaml)
+# only grants permissions on Deployments/ConfigMaps/Services/PersistentVolumeClaims - NOT
+# Namespaces, Secrets, or NetworkPolicies, all three of which studylife-ai also has (see
+# k8s/00-namespace.yaml, k8s/02-secret.yaml, k8s/05-network-policies.yaml). Those three are
+# bootstrap-only, applied once by hand; Flux continuously reconciles exactly this subset.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../01-config.yaml
+  - ../03-qdrant.yaml
+  - ../04-app.yaml

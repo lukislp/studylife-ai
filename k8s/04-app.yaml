@@ -1,0 +1,83 @@
+# The service itself. Image tag is a placeholder ("0.1.0") overwritten by Flux's
+# ImageUpdateAutomation the moment the studylife repo's k8s/flux/09-studylife-ai-image-update-
+# automation.yaml first reconciles against a real published tag (see docs/decisions.md
+# "M5 - Deployment design"). Dockerfile creates "appuser" with an explicit numeric --uid 1000
+# (unlike the vendored Qdrant image, see k8s/03-qdrant.yaml) - runAsNonRoot/runAsUser is safe
+# here without live inspection, since it's this repo's own Dockerfile, not an opaque third-party
+# image.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: studylife-ai-data
+  namespace: studylife-ai
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: studylife-ai
+  namespace: studylife-ai
+spec:
+  replicas: 1
+  strategy:
+    # Single instance with an RWO volume (registered_keys.db/agent_checkpoints.db are plain
+    # SQLite files, not built for concurrent writers) - same reasoning as Qdrant/uptime-kuma.
+    type: Recreate
+  selector:
+    matchLabels: { app: studylife-ai }
+  template:
+    metadata:
+      labels: { app: studylife-ai }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        # Makes the PVC mount group-writable by UID 1000 on first mount - without this, a
+        # freshly-provisioned PersistentVolume is root-owned and the non-root container gets
+        # "Permission denied" writing to /app/data (registered_keys.db/agent_checkpoints.db).
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: studylife-ai
+          image: ghcr.io/lukislp/studylife-ai:0.1.0 # {"$imagepolicy": "flux-system:studylife-ai"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          envFrom:
+            - configMapRef: { name: studylife-ai-config }
+            - secretRef: { name: studylife-ai-secrets }
+          ports:
+            - containerPort: 8000
+          resources:
+            requests: { cpu: 100m, memory: 200Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: studylife-ai-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: studylife-ai
+  namespace: studylife-ai
+spec:
+  type: ClusterIP
+  selector: { app: studylife-ai }
+  ports:
+    - port: 8000
+      targetPort: 8000

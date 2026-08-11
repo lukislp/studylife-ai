@@ -1,0 +1,75 @@
+# In-cluster vector DB (M2 ingestion + RAG retrieval), same image as local docker-compose.yml.
+# Single replica, no HA - a personal-scale note corpus has no availability requirement that
+# justifies Qdrant's own clustering mode. /livez and /readyz confirmed live against the real
+# image (docker-compose's local Qdrant, both 200 OK) - not guessed from docs.
+#
+# No runAsNonRoot/runAsUser: checked live (docker run --entrypoint sh qdrant/qdrant:latest -c
+# id) - the official image runs as root with no alternate non-root user or writable-by-non-root
+# /qdrant directory built in, unlike studylife's own aspnet-based image. Forcing a non-root UID
+# here would need an initContainer to chown the PVC first - not worth the added complexity for
+# a vendored image with no non-root support, and studylife-ai's namespace only hard-enforces the
+# "baseline" Pod Security Standard (allows root), same as studylife-scale.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-storage
+  namespace: studylife-ai
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 2Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: studylife-ai
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single instance with an RWO volume - same reasoning as uptime-kuma in studylife
+  selector:
+    matchLabels: { app: qdrant }
+  template:
+    metadata:
+      labels: { app: qdrant }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - containerPort: 6333
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 1, memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 6333 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /livez, port: 6333 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+      volumes:
+        - name: storage
+          persistentVolumeClaim: { claimName: qdrant-storage }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: studylife-ai
+spec:
+  selector: { app: qdrant }
+  ports:
+    - port: 6333
+      targetPort: 6333
