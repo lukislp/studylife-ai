@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
+from studylife_ai.api.rate_limit import enforce_rate_limit
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.llm.client import stream_chat_completion
@@ -96,7 +97,7 @@ async def _sse_event_stream(
     yield "data: [DONE]\n\n"
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(enforce_rate_limit)])
 async def chat(
     request: ChatRequest,
     http_request: Request,

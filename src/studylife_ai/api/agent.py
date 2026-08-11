@@ -29,6 +29,7 @@ from langgraph.types import Command
 from studylife_ai.agent.graph import build_agent
 from studylife_ai.agent.tools import build_tools
 from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
+from studylife_ai.api.rate_limit import enforce_rate_limit
 from studylife_ai.config import get_settings
 from studylife_ai.schemas.agent import AgentRequest, AgentResponse, ConfirmRequest, PendingAction
 from studylife_ai.studylife.client import StudyLifeClient
@@ -139,7 +140,7 @@ async def _invoke_and_handle_failure(
     return result
 
 
-@router.post("/agent")
+@router.post("/agent", dependencies=[Depends(enforce_rate_limit)])
 async def run_agent(
     request: AgentRequest,
     http_request: Request,
@@ -170,7 +171,7 @@ async def run_agent(
     return _response_from_result(result, thread_id)
 
 
-@router.post("/agent/confirm")
+@router.post("/agent/confirm", dependencies=[Depends(enforce_rate_limit)])
 async def confirm_agent_action(
     request: ConfirmRequest,
     http_request: Request,

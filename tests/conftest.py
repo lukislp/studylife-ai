@@ -14,6 +14,17 @@ TEST_USER_ID = "test-user"
 TEST_SHARED_SECRET = "test-shared-secret"
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_windows() -> None:
+    """rate_limit._windows is module-level state, deliberately (it has to persist across
+    requests for the process lifetime) - but that means it'd otherwise leak between test
+    cases too, since pytest runs them in the same process. Reset before every test, not just
+    ones that use `client`, in case a future test imports the module directly."""
+    from studylife_ai.api import rate_limit
+
+    rate_limit._windows.clear()
+
+
 def make_proxy_token(
     user_id: str, *, secret: str = TEST_SHARED_SECRET, expires_in: int = 60
 ) -> str:
@@ -35,7 +46,7 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
     # depend on whatever STUDYLIFE_SHARED_SECRET happens to be in the
     # local/CI environment. Tests exercising that specifically override
     # per-test.
-    for module in ("chat", "agent", "identity", "internal"):
+    for module in ("chat", "agent", "identity", "internal", "rate_limit"):
         monkeypatch.setattr(f"studylife_ai.api.{module}.get_settings", _fake_get_settings)
 
     # Default: /internal/register-key's post-response auto-ingestion background task (see

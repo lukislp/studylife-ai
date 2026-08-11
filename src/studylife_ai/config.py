@@ -142,6 +142,15 @@ class Settings(BaseSettings):
     # manually-maintained INGESTION_USERS list).
     registered_keys_db_path: str = "registered_keys.db"
 
+    # Rate limiting (see docs/decisions.md "Rate limiting"): a fixed-window counter per
+    # resolved user_id, guarding /chat and /agent /agent-confirm - the endpoints that incur
+    # real LLM cost. Defends against a leaked token or a client-side bug (e.g. a retry loop)
+    # running up cost or starving the service, not against many distinct attackers - this is a
+    # personal-scale, single-replica deployment (see k8s/04-app.yaml's `Recreate` strategy), not
+    # a public API, so an in-memory counter (no Redis/shared state) is enough.
+    rate_limit_requests: int = 20
+    rate_limit_window_seconds: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:
