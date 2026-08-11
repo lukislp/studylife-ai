@@ -228,8 +228,6 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **M6** — Documentation polish, architecture diagram ([Architecture](#architecture)), demo material ([docs/demo.md](docs/demo.md)).
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
 
-Not on the roadmap, deliberately not built: reliable aggregate/statistical answers ("how many sessions did I have last year") - RAG hands the LLM a bounded sample of chunks, not the full dataset, so it can't reliably count or summarize across a full year. Would need a dedicated tool querying a real StudyLife stats endpoint, not retrieval - tracked as a known gap, not started.
-
 ## Tech stack
 
 | Component      | Technology                                                    |
