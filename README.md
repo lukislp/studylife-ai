@@ -182,6 +182,7 @@ No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eva
 - [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
 - [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
+- [ ] **M4.5** — Multi-user support: StudyLife-backend-proxied auth (per-user `AiApiKey`), per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership. Design decided, not yet implemented — see [docs/decisions.md](docs/decisions.md).
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
