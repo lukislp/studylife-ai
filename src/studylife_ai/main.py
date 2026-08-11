@@ -1,5 +1,7 @@
 """FastAPI application entrypoint."""
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,6 +12,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from studylife_ai.api import agent, chat, health, internal
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
+from studylife_ai.ingestion.scheduler import run_periodic_sync
 from studylife_ai.llm.logging import configure_llm_usage_logging
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
@@ -27,6 +30,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await registered_key_store.setup()
     app.state.registered_key_store = registered_key_store
 
+    # Keeps Qdrant in step with StudyLife's own data on an ongoing basis (see
+    # docs/decisions.md "Periodic ingestion sync") - only started when
+    # ingestion is actually configured, same guard as the register-key
+    # auto-sync in api/internal.py, so tests/CI without STUDYLIFE_API_BASE_URL
+    # never spin up a loop that would just log "not configured" every tick.
+    sync_task: asyncio.Task[None] | None = None
+    if settings.studylife_api_base_url:
+        sync_task = asyncio.create_task(run_periodic_sync(settings))
+
     # The agent graph itself is no longer built here - it's rebuilt per
     # /agent request with the calling user's own StudyLifeClient (see
     # docs/decisions.md "M4.5 Multi-user support" - "Agent graph: rebuilt
@@ -42,6 +54,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
+            if sync_task is not None:
+                sync_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sync_task
             await app.state.qdrant_store.close()
             await registered_key_store.close()
 

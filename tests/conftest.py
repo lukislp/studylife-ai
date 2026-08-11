@@ -47,6 +47,18 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
 
     monkeypatch.setattr("studylife_ai.api.internal.sync_user", _noop_sync_user)
 
+    # Default: the periodic ingestion sync loop (see docs/decisions.md "Periodic
+    # ingestion sync") is a no-op in tests, same reasoning as _noop_sync_user
+    # above - main.py's lifespan reads real, un-monkeypatched settings (it calls
+    # studylife_ai.config.get_settings() directly, not any of the per-module
+    # ones patched above), so a local .env with STUDYLIFE_API_BASE_URL set would
+    # otherwise start a real background task hitting it on every test using
+    # this fixture.
+    async def _noop_run_periodic_sync(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("studylife_ai.main.run_periodic_sync", _noop_run_periodic_sync)
+
     # Runs the app's lifespan (startup/shutdown) — ASGITransport alone doesn't,
     # and /chat needs app.state.qdrant_store, which lifespan sets up.
     async with app.router.lifespan_context(app):

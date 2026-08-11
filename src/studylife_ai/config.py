@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # hardcoded False in sync.py), but config-driven like every other
     # pipeline tunable here for consistency and testability.
     studylife_session_history_days: int = 1825
+    # How often the in-process background loop re-runs sync_all() (see
+    # ingestion/scheduler.py, docs/decisions.md "Periodic ingestion sync").
+    # Cheap to run often: sync_content_type's per-entity fingerprint diff
+    # already skips anything unchanged, so a 60s full-catalog pass only ever
+    # pays for what actually changed since the last tick.
+    ingestion_sync_interval_seconds: int = 60
 
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.

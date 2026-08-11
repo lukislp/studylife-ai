@@ -103,6 +103,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `STUDYLIFE_SHARED_SECRET`      | _(unset)_                 | Shared secret StudyLife signs per-request proxy tokens with — must match StudyLife's own config exactly. Also authenticates `POST /internal/register-key`/`revoke-key`. See [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". |
 | `REGISTERED_KEYS_DB_PATH`      | `registered_keys.db`      | SQLite file mapping `user_id` → real `AiApiKey`, populated automatically by StudyLife's registration callback — not set manually. Used by `/agent` and ingestion. |
 | `STUDYLIFE_SESSION_HISTORY_DAYS` | `1825`                  | Lookback window (in days, from "now") for ingesting study sessions. Rolling, not a fixed boundary — a session older than this is dropped from the index on the next sync — see [docs/decisions.md](docs/decisions.md). |
+| `INGESTION_SYNC_INTERVAL_SECONDS` | `60`                   | How often the in-process background loop re-syncs every registered account — see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Periodic ingestion sync". |
 | `EMBEDDING_MODEL`              | `ollama/nomic-embed-text` | LiteLLM embedding model identifier, same provider convention as `LLM_MODEL`. |
 | `QDRANT_URL`                   | `http://localhost:6333`  | Qdrant connection URL.                                                      |
 | `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for all ingested chunks (notes, courses, sessions, course goals). |
@@ -128,7 +129,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 
 Syncs StudyLife notes, courses, study sessions (calendar), and course goals into one Qdrant collection: fetches all entities of each type, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. A `content_type` field on every point disambiguates types that can share numeric ids (e.g. course id=5 and note id=5); a `user_id` field disambiguates different StudyLife accounts the same way. Requires `STUDYLIFE_API_BASE_URL` and at least one user registered in `REGISTERED_KEYS_DB_PATH`.
 
-A new registration (`POST /internal/register-key`) automatically triggers a background sync for just that user, so `/chat`'s RAG results aren't empty right after generating an `AiApiKey` — see [docs/decisions.md](docs/decisions.md) "Auto-ingestion on register". For everyone already registered, `python -m studylife_ai.ingestion` (below) re-syncs every registered account, one after another, each into its own Qdrant partition; a single account's failure (revoked key, StudyLife-side error) is logged and skipped rather than aborting the run for everyone else. There is no scheduled/periodic re-sync yet - re-run it manually (e.g. cron) to pick up content changed after the first sync.
+A new registration (`POST /internal/register-key`) automatically triggers a background sync for just that user, so `/chat`'s RAG results aren't empty right after generating an `AiApiKey` — see [docs/decisions.md](docs/decisions.md) "Auto-ingestion on register". After that, an in-process background loop re-syncs every registered account automatically every `INGESTION_SYNC_INTERVAL_SECONDS` (default 60s) — see "Periodic ingestion sync" — so content changed later (via the agent, or directly in StudyLife) shows up in `/chat` within about a minute, without a manual re-run. `python -m studylife_ai.ingestion` (below) runs the same sync on demand, e.g. right after deploying against a fresh Qdrant.
 
 ```bash
 # via docker compose (uses the running app container's environment)
@@ -167,7 +168,7 @@ curl -X POST http://localhost:8000/agent/confirm \
 
 ## Evaluation
 
-RAGAS-based eval, replaying [`eval/dataset.jsonl`](eval/dataset.jsonl) (12 cases) through the real retrieval + generation pipeline: `uv run python -m studylife_ai.eval`. Requires `EVAL_JUDGE_MODEL` (a model independent of `LLM_MODEL`, see [Configuration](#configuration)) — currently `openai/gpt-4o-mini`.
+RAGAS-based eval, replaying [`eval/dataset.jsonl`](eval/dataset.jsonl) (17 cases) through the real retrieval + generation pipeline: `uv run python -m studylife_ai.eval`. Requires `EVAL_JUDGE_MODEL` (a model independent of `LLM_MODEL`, see [Configuration](#configuration)) — currently `openai/gpt-4o-mini`.
 
 Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising.
 
@@ -183,6 +184,8 @@ Baseline (M3, pure vector search, shared top-5 across content types, Ollama embe
 Context Precision is the metric this round of work targeted, and it improved substantially. Answer Relevancy dropped somewhat — not separately investigated; the embedding-model switch changing which passages the judge's own relevance model considers "relevant" is a plausible but unconfirmed explanation, flagged here rather than assumed. The remaining note-match miss (`statistik-breit`, a broad question expecting two different notes) is a known, documented limitation: both expected notes are confirmed present in the candidate pool, but 4 content types compete for 5 final slots on the same topic — a structural quota trade-off, not a bug (see [docs/decisions.md](docs/decisions.md) for the full investigation).
 
 No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
+
+The table above is the M3 reranking-improvement story on the original 12 note-only cases. The dataset was later expanded to 17 cases to also cover `course`/`session`/`course_goal` content (see [docs/decisions.md](docs/decisions.md) "Eval-set expansion") — real local run against all 17: **100% note-match rate**, Faithfulness 0.79, Answer Relevancy 0.86, Context Precision 0.85.
 
 ## Observability
 
