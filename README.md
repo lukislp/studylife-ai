@@ -134,8 +134,8 @@ Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/d
 | Metric | Score |
 | --- | --- |
 | Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) — the one miss is a broad, multi-note question retrieval doesn't fully cover at `top_k=5`, a real retrieval-design data point |
-| Faithfulness | 0.80 |
-| Answer Relevancy | 0.88 |
+| Faithfulness | 0.77 |
+| Answer Relevancy | 0.90 |
 | Context Precision (`LLMContextPrecisionWithoutReference`) | 0.58 |
 
 These are the first real numbers; no CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").

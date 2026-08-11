@@ -127,10 +127,14 @@ def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, BaseRagasEmbeddings]
     # here (Faithfulness, AnswerRelevancy, ContextPrecision) expect a BaseRagasLLM
     # (.agenerate_text), which llm_factory()'s InstructorBaseRagasLLM does not
     # implement (.agenerate only) - confirmed by inspecting both classes directly.
-    # bypass_n=True: ChatLiteLLM's n= support silently returned 1 generation
-    # instead of the requested 3 for statement-generation robustness; bypass_n
-    # makes ragas issue n separate calls instead of relying on that.
-    judge_llm = LangchainLLMWrapper(ChatLiteLLM(model=settings.eval_judge_model), bypass_n=True)
+    # bypass_n=False (default): tried True to fix ChatLiteLLM's n= support
+    # silently returning 1 generation instead of the requested 3 for
+    # Faithfulness' statement-generation step, but that triples Faithfulness'
+    # call volume - in CI that pushed 26/36 sub-calls into RunConfig's 180s
+    # timeout (see docs/decisions.md). A degraded-but-present score (n=1) beats
+    # a reliably-NaN one (timed out at n=3), especially with no CI thresholds
+    # depending on the exact value yet.
+    judge_llm = LangchainLLMWrapper(ChatLiteLLM(model=settings.eval_judge_model))
     judge_embeddings = _JudgeEmbeddings(model=settings.embedding_model)
     return judge_llm, judge_embeddings
 
