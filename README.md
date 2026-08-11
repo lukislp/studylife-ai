@@ -108,14 +108,16 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for all ingested chunks (notes, courses, sessions, course goals). |
 | `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
-| `RETRIEVAL_TOP_K`              | `5`                       | Number of chunks retrieved per query (fixed top-k, v1 — see [docs/decisions.md](docs/decisions.md)). |
+| `RETRIEVAL_TOP_K`              | `5`                       | Final number of chunks handed to the LLM, after the candidate pool below is fetched and (optionally) reranked — see [Retrieval quality](docs/decisions.md). |
+| `RERANK_CANDIDATE_K`           | `20`                      | Target candidate pool size, split evenly across the 4 content types (note/course/session/course_goal) — always applied, independent of `RERANK_MODEL`. See [docs/decisions.md](docs/decisions.md). |
+| `RERANK_MODEL`                 | _(unset)_                 | LiteLLM model identifier for optional LLM-based reranking of the candidate pool, independent of `LLM_MODEL`. Unset = candidate pool is just sorted by vector-similarity score. See [docs/decisions.md](docs/decisions.md). |
 | `EVAL_JUDGE_MODEL`             | _(unset)_                 | LiteLLM model identifier for the RAGAS eval judge, deliberately independent of `LLM_MODEL` — see [Evaluation](#evaluation). Required to run `python -m studylife_ai.eval`. |
 | `AGENT_CHECKPOINT_DB_PATH`     | `agent_checkpoints.db`    | SQLite file storing paused agent state between a proposed write action and its confirmation — survives a service restart. See [Agent](#agent). |
 
 ## API
 
 - `GET /health` — liveness check.
-- `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks across notes, courses, sessions, and course goals (see [Retrieval design](docs/decisions.md)), injected as a system message ahead of the conversation. Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
+- `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks: an even candidate quota is fetched from each content type (notes, courses, sessions, course goals), merged, optionally reranked by an LLM (`RERANK_MODEL`), then cut down to `RETRIEVAL_TOP_K` and injected as a system message ahead of the conversation (see [Retrieval quality](docs/decisions.md)). Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
 - `POST /agent` / `POST /agent/confirm` — tool-calling with confirmed writes, see [Agent](#agent).
 
 ## Ingestion
@@ -159,16 +161,20 @@ Requires `STUDYLIFE_API_BASE_URL`/`STUDYLIFE_API_KEY` (same as ingestion) — wi
 
 RAGAS-based eval, replaying [`eval/dataset.jsonl`](eval/dataset.jsonl) (12 cases) through the real retrieval + generation pipeline: `uv run python -m studylife_ai.eval`. Requires `EVAL_JUDGE_MODEL` (a model independent of `LLM_MODEL`, see [Configuration](#configuration)) — currently `openai/gpt-4o-mini`.
 
-Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising. First clean baseline run, against the real dev note corpus, 2026-08-11:
+Wired into CI on every push to `main` (not on PRs, to bound cost — see [docs/decisions.md](docs/decisions.md)). CI has no real StudyLife instance or local Ollama, so it seeds a small committed note corpus ([`eval/fixture_notes.jsonl`](eval/fixture_notes.jsonl)) into a throwaway Qdrant container first (`uv run python -m studylife_ai.eval.seed_fixture`), then runs the same eval against OpenAI models. No score thresholds gate the build yet — the job just needs to run without raising.
 
-| Metric | Score |
-| --- | --- |
-| Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) — the one miss is a broad, multi-note question retrieval doesn't fully cover at `top_k=5`, a real retrieval-design data point |
-| Faithfulness | 0.77 |
-| Answer Relevancy | 0.90 |
-| Context Precision (`LLMContextPrecisionWithoutReference`) | 0.58 |
+Baseline (M3, pure vector search, shared top-5 across content types, Ollama embeddings) vs. current (per-content-type candidate quota + LLM reranking + OpenAI embeddings — see [Retrieval quality](docs/decisions.md)), both against the real dev note corpus:
 
-These are the first real numbers; no CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
+| Metric | Baseline (2026-08-11) | Current (2026-08-11) |
+| --- | --- | --- |
+| Note-match rate (custom, non-LLM: did retrieval find the expected note?) | 92% (11/12) | 92% (11/12) — same rate, different case: the two originally-diagnosed misses are fixed, one new structural case (multi-note question, see below) is now the miss |
+| Faithfulness | 0.77 | 0.82 |
+| Answer Relevancy | 0.90 | 0.82 |
+| Context Precision (`LLMContextPrecisionWithoutReference`) | 0.58 | 0.92 |
+
+Context Precision is the metric this round of work targeted, and it improved substantially. Answer Relevancy dropped somewhat — not separately investigated; the embedding-model switch changing which passages the judge's own relevance model considers "relevant" is a plausible but unconfirmed explanation, flagged here rather than assumed. The remaining note-match miss (`statistik-breit`, a broad question expecting two different notes) is a known, documented limitation: both expected notes are confirmed present in the candidate pool, but 4 content types compete for 5 final slots on the same topic — a structural quota trade-off, not a bug (see [docs/decisions.md](docs/decisions.md) for the full investigation).
+
+No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
 
 ## Roadmap
 
