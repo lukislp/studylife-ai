@@ -66,9 +66,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: studylife-ca
+              mountPath: /etc/studylife-ca
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: studylife-ai-data}
+        - name: studylife-ca
+          configMap: {name: studylife-internal-ca}
 ---
 apiVersion: v1
 kind: Service

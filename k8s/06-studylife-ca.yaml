@@ -1,0 +1,38 @@
+# The public root certificate of StudyLife's own cluster-internal cert-manager CA
+# (studylife-internal-ca-issuer, secret cert-manager/studylife-internal-ca in the studylife
+# repo's k8s/07b-cert-manager-issuers.yaml) - NOT the private key, which never leaves that
+# secret. Public certificate data, safe to commit: knowing it only lets a client verify certs
+# signed by this CA, it grants no ability to issue new ones. Flux-managed (see
+# k8s/flux-deploy/kustomization.yaml) like the other ConfigMap - unlike Secrets this resource
+# kind IS within kustomize-controller's granted RBAC.
+#
+# Found live: studylife-ai's httpx client failed every call to StudyLife's own API with
+# CERTIFICATE_VERIFY_FAILED, because StudyLife's internal HTTPS (the cluster-internal Service on
+# port 8443, and the only path that stays reachable without the public Gateway hop - see
+# k8s/01-config.yaml's STUDYLIFE_API_BASE_URL) is signed by this private CA, which the
+# container's default (certifi) trust store has no reason to know. See docs/decisions.md
+# "M5 - Deployment design" for the full story, including the rejected alternative
+# (verify=False) and why plain HTTP wasn't a way around this either (StudyLife's own
+# UseHttpsRedirection forces HTTPS even for internal traffic).
+#
+# 10-year validity (see the studylife repo's Certificate resource) - a low enough rotation
+# frequency that a manual re-sync of this file on actual rotation is an acceptable trade-off
+# against the complexity of automating it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: studylife-internal-ca
+  namespace: studylife-ai
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBhDCCASqgAwIBAgIUSS8ItxFLIFDQryS6aizQInDQIpgwCgYIKoZIzj0EAwIw
+    IDEeMBwGA1UEAxMVc3R1ZHlsaWZlLWludGVybmFsLWNhMB4XDTI2MDcxNzIxMTQz
+    N1oXDTM2MDcxNDIxMTQzN1owIDEeMBwGA1UEAxMVc3R1ZHlsaWZlLWludGVybmFs
+    LWNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGScdaQokz65c9RcGJw6by3HJ
+    3GfPstwoQLchCXci7my6PZj1oQaC6vqalB0fDjQJfOfaHUEe/GTzkkejUvL/aaNC
+    MEAwDgYDVR0PAQH/BAQDAgKkMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFDCE
+    p6AmLQqDamt1+ECbfyQkLHrOMAoGCCqGSM49BAMCA0gAMEUCIGA+niHnQ3kX6aLP
+    FpD248LqZ3dsZj7n5UYDYnjJ+U+BAiEA5sD+ARZDEWOwVYXasmpLp4aq8T+tFIo0
+    +I59FdR3FDk=
+    -----END CERTIFICATE-----

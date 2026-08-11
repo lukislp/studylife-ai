@@ -37,7 +37,13 @@ data:
   LLM_API_BASE: ""
   LLM_REQUEST_TIMEOUT_SECONDS: "60"
 
-  STUDYLIFE_API_BASE_URL: "http://studylife-web.studylife-scale.svc.cluster.local"
+  # https on the internal Service port, not the http one - StudyLife's own UseHttpsRedirection
+  # middleware forces HTTPS unconditionally, even for internal traffic (found live: the http
+  # URL round-tripped through a 307 redirect back to :8443 anyway). STUDYLIFE_CA_CERT_PATH
+  # points at the mounted CA cert (k8s/06-studylife-ca.yaml) needed to verify that connection -
+  # StudyLife's internal cert-manager CA isn't in any public trust store.
+  STUDYLIFE_API_BASE_URL: "https://studylife-web.studylife-scale.svc.cluster.local:8443"
+  STUDYLIFE_CA_CERT_PATH: "/etc/studylife-ca/ca.crt"
 
   EMBEDDING_MODEL: "openai/text-embedding-3-small"
 

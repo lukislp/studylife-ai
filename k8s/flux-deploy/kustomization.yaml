@@ -1,4 +1,4 @@
-# Deliberately ONLY these two files - NOT the rest of k8s/. Mirrors studylife's own
+# Deliberately ONLY these files - NOT the rest of k8s/. Mirrors studylife's own
 # k8s/flux/deploy/kustomization.yaml scoping, for the same underlying reason: kustomize-
 # controller's least-privilege ClusterRole (studylife repo's k8s/flux/06-reconciler-rbac.yaml)
 # only grants permissions on Deployments/ConfigMaps/Services/PersistentVolumeClaims - NOT
@@ -11,3 +11,4 @@ resources:
   - ../01-config.yaml
   - ../03-qdrant.yaml
   - ../04-app.yaml
+  - ../06-studylife-ca.yaml
