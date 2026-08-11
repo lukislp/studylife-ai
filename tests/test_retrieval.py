@@ -42,7 +42,34 @@ async def test_retrieve_chunks_embeds_query_and_searches_by_user(monkeypatch: Mo
 
     assert result == expected
     assert embed_calls == [["What did I write about eigenvalues?"]]
-    store.search.assert_awaited_once_with(vector=[0.1, 0.2], user_id="primary", limit=5)
+    store.search.assert_awaited_once_with(
+        vector=[0.1, 0.2], user_id="primary", limit=5, content_type=None
+    )
+
+
+async def test_retrieve_chunks_passes_content_type_filter_through(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = QdrantStore(url="http://qdrant.test:6333", collection="studylife_notes")
+    store.search = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
+
+    await retrieve_chunks(
+        "meine Statistik-Notizen",
+        store=store,
+        embedding_model="ollama/nomic-embed-text",
+        user_id="primary",
+        top_k=5,
+        content_type="note",
+    )
+
+    store.search.assert_awaited_once_with(
+        vector=[0.1, 0.2], user_id="primary", limit=5, content_type="note"
+    )
 
 
 async def test_retrieve_chunks_returns_empty_when_embedding_fails_to_produce_a_vector(

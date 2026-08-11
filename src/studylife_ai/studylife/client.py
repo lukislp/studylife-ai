@@ -75,6 +75,49 @@ class StudyLifeClient:
         response.raise_for_status()
         return [CourseGoalDto.model_validate(item) for item in response.json()]
 
+    async def create_session(self, session: StudySessionDto) -> StudySessionDto:
+        """Create a study session (calendar entry).
+
+        `session.id` is ignored - the server always assigns a fresh one
+        (pass 0). The server validates `course_id > 0`, non-empty
+        `course_name`, `end_time > start_time`, and duration <= 24h, but does
+        **not** check `course_id` against the real course catalog - callers
+        should resolve it via `get_courses()` first. On invalid input this
+        raises `httpx.HTTPStatusError` with a *plain-text* body (not JSON),
+        e.g. via `exc.response.text`.
+        """
+        response = await self._client.post(
+            "/api/sessions", json=session.model_dump(by_alias=True, mode="json")
+        )
+        response.raise_for_status()
+        return StudySessionDto.model_validate(response.json())
+
+    async def create_note(
+        self,
+        *,
+        title: str,
+        content: str,
+        course_id: int | None = None,
+        session_id: int | None = None,
+    ) -> StudyLifeNote:
+        """Create a note. `id`/`created_at`/`updated_at` are server-assigned -
+        unlike `create_session`, plain parameters are taken instead of a full
+        `StudyLifeNote` (which requires real timestamps a new note doesn't
+        have yet). No validation on this endpoint - StudyLife accepts empty
+        title/content and any course_id/session_id without checking they exist.
+        """
+        response = await self._client.post(
+            "/api/notes",
+            json={
+                "title": title,
+                "content": content,
+                "courseId": course_id,
+                "sessionId": session_id,
+            },
+        )
+        response.raise_for_status()
+        return StudyLifeNote.model_validate(response.json())
+
     async def aclose(self) -> None:
         await self._client.aclose()
 

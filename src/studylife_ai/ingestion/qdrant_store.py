@@ -121,17 +121,35 @@ class QdrantStore:
         await self._client.upsert(collection_name=self._collection, points=points)
 
     async def search(
-        self, *, vector: list[float], user_id: str, limit: int
+        self,
+        *,
+        vector: list[float],
+        user_id: str,
+        limit: int,
+        content_type: ContentType | None = None,
     ) -> list[RetrievedChunk]:
-        """Vector search scoped to a single user (see docs/decisions.md "Retrieval design")."""
+        """Vector search scoped to a single user (see docs/decisions.md "Retrieval design").
+
+        `content_type` is an optional narrowing filter, not a change to the
+        v1 "no metadata filter" default - regular /chat retrieval still
+        omits it entirely. Added for the M4 `search_notes` agent tool, which
+        needs to search within notes only, not mix in courses/sessions.
+        """
         if not await self.collection_exists():
             return []
+        must: list[models.Condition] = [
+            models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+        ]
+        if content_type is not None:
+            must.append(
+                models.FieldCondition(
+                    key="content_type", match=models.MatchValue(value=content_type)
+                )
+            )
         response = await self._client.query_points(
             collection_name=self._collection,
             query=vector,
-            query_filter=models.Filter(
-                must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))]
-            ),
+            query_filter=models.Filter(must=must),
             limit=limit,
             with_payload=True,
         )

@@ -7,7 +7,7 @@ the separate, not-yet-decided "Prompt-Design" area, so this module has no
 /chat wiring yet.
 """
 
-from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
+from studylife_ai.ingestion.qdrant_store import ContentType, QdrantStore, RetrievedChunk
 from studylife_ai.llm.embeddings import embed_texts
 
 
@@ -18,9 +18,17 @@ async def retrieve_chunks(
     embedding_model: str,
     user_id: str,
     top_k: int,
+    content_type: ContentType | None = None,
 ) -> list[RetrievedChunk]:
-    """Return up to `top_k` chunks belonging to `user_id`, ranked by similarity to `query`."""
+    """Return up to `top_k` chunks belonging to `user_id`, ranked by similarity to `query`.
+
+    `content_type` narrows the search to one entity type (see
+    `QdrantStore.search`) - unused by /chat's default RAG retrieval, used by
+    the M4 `search_notes` agent tool.
+    """
     vectors = await embed_texts([query], model=embedding_model)
     if not vectors:
         return []
-    return await store.search(vector=vectors[0], user_id=user_id, limit=top_k)
+    return await store.search(
+        vector=vectors[0], user_id=user_id, limit=top_k, content_type=content_type
+    )
