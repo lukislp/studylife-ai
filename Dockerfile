@@ -17,7 +17,10 @@ COPY README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+# /app/data must exist (and be owned by appuser) before the named volume
+# mounts over it - otherwise Docker auto-creates the mount point as root,
+# and the non-root appuser below can't open its sqlite files there.
+RUN mkdir -p /app/data && useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH"

@@ -6,11 +6,18 @@ services:
     env_file:
       - .env
     environment:
-      # Inside the compose network, Ollama/Qdrant are reachable by service
-      # name, not localhost — overrides the .env defaults for
-      # container-to-container calls.
-      LLM_API_BASE: http://ollama:11434
+      # Inside the compose network, Qdrant is reachable by service name, not
+      # localhost — overrides the .env default for container-to-container calls.
       QDRANT_URL: http://qdrant:6333
+      # Same translation for Ollama, but opt-in only: a *completely unset*
+      # LLM_API_BASE falls back to the container-reachable Ollama hostname (the
+      # zero-API-key default path); an LLM_API_BASE already set in .env -
+      # including set to an empty string, e.g. to use an API provider like
+      # OpenAI - passes through untouched. `${VAR-default}` (no colon) is the
+      # form that distinguishes "unset" from "set to empty", unlike
+      # `${VAR:-default}` - the colon form previously forced every
+      # API-provider .env onto Ollama's URL instead.
+      LLM_API_BASE: ${LLM_API_BASE-http://ollama:11434}
       # M4 agent: without a volume, this SQLite file would live in the
       # container's writable layer and be lost on every `docker compose up
       # --build`/recreate — defeating the whole point of a persistent
