@@ -1,3 +1,11 @@
+## [1.0.3](https://github.com/lukislp/studylife-ai/compare/v1.0.2...v1.0.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* **k8s:** use the Service's real port (443), not the container's (8443) ([76d2ad0](https://github.com/lukislp/studylife-ai/commit/76d2ad0ac88c03d9a238f94cb1896e249d3dbead))
+* retrigger release after the v1.0.2 tag/publish desync ([9fc45ad](https://github.com/lukislp/studylife-ai/commit/9fc45adb49f357a39fef8d71a985bc8691d158f7))
+
 # 1.0.0 (2026-08-11)
 
 
