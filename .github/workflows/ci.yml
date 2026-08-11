@@ -30,7 +30,7 @@ jobs:
           if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
             echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
           elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" \
-              | grep -qE '^(src/studylife_ai/(rag|ingestion|llm|agent)/|src/studylife_ai/config\.py|eval/)'; then
+              | grep -qE '^(src/studylife_ai/(rag|ingestion|llm|agent|eval|studylife|schemas)/|src/studylife_ai/config\.py|eval/)'; then
             echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "eval-relevant=false" >> "$GITHUB_OUTPUT"
