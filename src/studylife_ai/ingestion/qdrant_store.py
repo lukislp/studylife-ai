@@ -1,21 +1,30 @@
-"""Qdrant wrapper: collection lifecycle, note-scoped upsert/delete, known-state scroll.
+"""Qdrant wrapper: collection lifecycle, entity-scoped upsert/delete, known-state scroll.
 
-Callers must call `ensure_collection()` before `replace_note()`/`delete_note()`.
+Callers must call `ensure_collection()` before `replace_entity()`/`delete_entity()`.
 `get_known_fingerprints()` is safe to call first (returns `{}` if the
 collection doesn't exist yet) — that's the intended order for a sync run,
 since the vector size needed by `ensure_collection()` is only known after
 the first real embedding call.
+
+Notes, courses, sessions, and course goals all share one collection,
+disambiguated by `content_type` (see docs/decisions.md "Ingestion scope
+expansion"). `content_type` + `entity_id` together are an entity's real
+identity — a course and a note can both have id=5 without colliding.
 """
 
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
 from qdrant_client import AsyncQdrantClient, models
 
+ContentType = Literal["note", "course", "session", "course_goal"]
+
 
 @dataclass
-class NoteChunkMetadata:
-    note_id: int
+class EntityChunkMetadata:
+    content_type: ContentType
+    entity_id: int
     title: str
     course_id: int | None
     session_id: int | None
@@ -25,7 +34,8 @@ class NoteChunkMetadata:
 
 @dataclass
 class RetrievedChunk:
-    note_id: int
+    content_type: ContentType
+    entity_id: int
     chunk_index: int
     content: str
     title: str
@@ -53,41 +63,41 @@ class QdrantStore:
             vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
         )
 
-    async def get_known_fingerprints(self) -> dict[int, str]:
-        """Last known fingerprint per note_id, derived from stored chunks.
+    async def get_known_fingerprints(self) -> dict[tuple[str, int], str]:
+        """Last known fingerprint per (content_type, entity_id), derived from stored chunks.
 
-        All chunks of a note share the same fingerprint, so the last one
-        seen per note_id while scrolling is sufficient.
+        All chunks of an entity share the same fingerprint, so the last one
+        seen per (content_type, entity_id) while scrolling is sufficient.
         """
         if not await self.collection_exists():
             return {}
 
-        known: dict[int, str] = {}
+        known: dict[tuple[str, int], str] = {}
         offset = None
         while True:
             points, offset = await self._client.scroll(
                 collection_name=self._collection,
-                with_payload=["note_id", "fingerprint"],
+                with_payload=["content_type", "entity_id", "fingerprint"],
                 with_vectors=False,
                 limit=256,
                 offset=offset,
             )
             for point in points:
                 payload = point.payload or {}
-                known[payload["note_id"]] = payload["fingerprint"]
+                known[(payload["content_type"], payload["entity_id"])] = payload["fingerprint"]
             if offset is None:
                 break
         return known
 
-    async def replace_note(
+    async def replace_entity(
         self,
         *,
         chunks: list[str],
         vectors: list[list[float]],
-        metadata: NoteChunkMetadata,
+        metadata: EntityChunkMetadata,
     ) -> None:
-        """Replace all chunks of a note: delete whatever exists, insert the given chunks."""
-        await self.delete_note(metadata.note_id)
+        """Replace all chunks of an entity: delete whatever exists, insert the given chunks."""
+        await self.delete_entity(content_type=metadata.content_type, entity_id=metadata.entity_id)
         if not chunks:
             return
         points = [
@@ -95,7 +105,8 @@ class QdrantStore:
                 id=str(uuid.uuid4()),
                 vector=vector,
                 payload={
-                    "note_id": metadata.note_id,
+                    "content_type": metadata.content_type,
+                    "entity_id": metadata.entity_id,
                     "chunk_index": index,
                     "content": chunk,
                     "title": metadata.title,
@@ -126,7 +137,8 @@ class QdrantStore:
         )
         return [
             RetrievedChunk(
-                note_id=point.payload["note_id"],
+                content_type=point.payload["content_type"],
+                entity_id=point.payload["entity_id"],
                 chunk_index=point.payload["chunk_index"],
                 content=point.payload["content"],
                 title=point.payload["title"],
@@ -138,8 +150,13 @@ class QdrantStore:
             if point.payload is not None
         ]
 
-    async def delete_note(self, note_id: int) -> None:
-        """No-op if the collection doesn't exist yet — nothing to delete."""
+    async def delete_entity(self, *, content_type: str, entity_id: int) -> None:
+        """No-op if the collection doesn't exist yet — nothing to delete.
+
+        Filters on both `content_type` and `entity_id` - a course and a note
+        can share a numeric id, so `entity_id` alone would risk deleting the
+        wrong entity.
+        """
         if not await self.collection_exists():
             return
         await self._client.delete(
@@ -147,7 +164,12 @@ class QdrantStore:
             points_selector=models.FilterSelector(
                 filter=models.Filter(
                     must=[
-                        models.FieldCondition(key="note_id", match=models.MatchValue(value=note_id))
+                        models.FieldCondition(
+                            key="content_type", match=models.MatchValue(value=content_type)
+                        ),
+                        models.FieldCondition(
+                            key="entity_id", match=models.MatchValue(value=entity_id)
+                        ),
                     ]
                 )
             ),

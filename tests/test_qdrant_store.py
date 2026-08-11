@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from studylife_ai.ingestion.qdrant_store import NoteChunkMetadata, QdrantStore, RetrievedChunk
+from studylife_ai.ingestion.qdrant_store import EntityChunkMetadata, QdrantStore, RetrievedChunk
 
 
 def _make_store() -> QdrantStore:
@@ -38,34 +38,38 @@ async def test_get_known_fingerprints_returns_empty_when_collection_missing() ->
     assert await store.get_known_fingerprints() == {}
 
 
-async def test_get_known_fingerprints_paginates_and_dedupes_by_note_id() -> None:
+async def test_get_known_fingerprints_paginates_and_dedupes_by_content_type_and_entity_id() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
 
     page1 = (
         [
-            SimpleNamespace(payload={"note_id": 1, "fingerprint": "a"}),
-            SimpleNamespace(payload={"note_id": 1, "fingerprint": "a"}),
+            SimpleNamespace(payload={"content_type": "note", "entity_id": 1, "fingerprint": "a"}),
+            SimpleNamespace(payload={"content_type": "note", "entity_id": 1, "fingerprint": "a"}),
         ],
         "next-offset",
     )
-    page2 = ([SimpleNamespace(payload={"note_id": 2, "fingerprint": "b"})], None)
+    page2 = (
+        [SimpleNamespace(payload={"content_type": "course", "entity_id": 1, "fingerprint": "b"})],
+        None,
+    )
     store._client.scroll = AsyncMock(side_effect=[page1, page2])
 
     result = await store.get_known_fingerprints()
 
-    assert result == {1: "a", 2: "b"}
+    assert result == {("note", 1): "a", ("course", 1): "b"}
     assert store._client.scroll.await_count == 2
 
 
-async def test_replace_note_deletes_existing_then_upserts_new_chunks() -> None:
+async def test_replace_entity_deletes_existing_then_upserts_new_chunks() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
     store._client.delete = AsyncMock()
     store._client.upsert = AsyncMock()
 
-    metadata = NoteChunkMetadata(
-        note_id=7,
+    metadata = EntityChunkMetadata(
+        content_type="note",
+        entity_id=7,
         title="Linear Algebra",
         course_id=3,
         session_id=None,
@@ -73,7 +77,7 @@ async def test_replace_note_deletes_existing_then_upserts_new_chunks() -> None:
         fingerprint="hash123",
     )
 
-    await store.replace_note(
+    await store.replace_entity(
         chunks=["chunk one", "chunk two"], vectors=[[0.1], [0.2]], metadata=metadata
     )
 
@@ -83,18 +87,20 @@ async def test_replace_note_deletes_existing_then_upserts_new_chunks() -> None:
     points = kwargs["points"]
     assert len(points) == 2
     assert [p.payload["chunk_index"] for p in points] == [0, 1]
-    assert all(p.payload["note_id"] == 7 for p in points)
+    assert all(p.payload["content_type"] == "note" for p in points)
+    assert all(p.payload["entity_id"] == 7 for p in points)
     assert all(p.payload["fingerprint"] == "hash123" for p in points)
 
 
-async def test_replace_note_with_no_chunks_only_deletes() -> None:
+async def test_replace_entity_with_no_chunks_only_deletes() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
     store._client.delete = AsyncMock()
     store._client.upsert = AsyncMock()
 
-    metadata = NoteChunkMetadata(
-        note_id=7,
+    metadata = EntityChunkMetadata(
+        content_type="note",
+        entity_id=7,
         title="Empty note",
         course_id=None,
         session_id=None,
@@ -102,32 +108,32 @@ async def test_replace_note_with_no_chunks_only_deletes() -> None:
         fingerprint="hash000",
     )
 
-    await store.replace_note(chunks=[], vectors=[], metadata=metadata)
+    await store.replace_entity(chunks=[], vectors=[], metadata=metadata)
 
     store._client.delete.assert_awaited_once()
     store._client.upsert.assert_not_awaited()
 
 
-async def test_delete_note_filters_by_note_id() -> None:
+async def test_delete_entity_filters_by_content_type_and_entity_id() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
     store._client.delete = AsyncMock()
 
-    await store.delete_note(42)
+    await store.delete_entity(content_type="course", entity_id=42)
 
     store._client.delete.assert_awaited_once()
     _, kwargs = store._client.delete.call_args
-    condition = kwargs["points_selector"].filter.must[0]
-    assert condition.key == "note_id"
-    assert condition.match.value == 42
+    conditions = kwargs["points_selector"].filter.must
+    assert {c.key for c in conditions} == {"content_type", "entity_id"}
+    assert {c.match.value for c in conditions} == {"course", 42}
 
 
-async def test_delete_note_is_noop_when_collection_missing() -> None:
+async def test_delete_entity_is_noop_when_collection_missing() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=False)
     store._client.delete = AsyncMock()
 
-    await store.delete_note(42)
+    await store.delete_entity(content_type="note", entity_id=42)
 
     store._client.delete.assert_not_awaited()
 
@@ -147,7 +153,8 @@ async def test_search_filters_by_user_id_and_maps_results() -> None:
     fake_point = SimpleNamespace(
         score=0.87,
         payload={
-            "note_id": 7,
+            "content_type": "note",
+            "entity_id": 7,
             "chunk_index": 1,
             "content": "Eigenvalues are important.",
             "title": "Linear Algebra",
@@ -163,7 +170,8 @@ async def test_search_filters_by_user_id_and_maps_results() -> None:
 
     assert result == [
         RetrievedChunk(
-            note_id=7,
+            content_type="note",
+            entity_id=7,
             chunk_index=1,
             content="Eigenvalues are important.",
             title="Linear Algebra",
