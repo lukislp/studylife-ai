@@ -10,9 +10,11 @@ class AgentRequest(BaseModel):
     conversation memory across unrelated turns, only within one
     propose-then-confirm pairing (see docs/decisions.md "M4 agent stack").
 
-    No per-request `model` override (unlike `ChatRequest`): the agent graph
-    is compiled once at startup with one bound model - swapping it per
-    request would mean rebuilding the whole graph, not a cheap parameter.
+    No per-request `model` override (unlike `ChatRequest`): one bound model
+    for everyone keeps behavior predictable across users - the agent graph
+    is already rebuilt per request for identity (see docs/decisions.md
+    "M4.5 Multi-user support"), but swapping the model too was a separate,
+    not-requested knob.
     """
 
     message: str

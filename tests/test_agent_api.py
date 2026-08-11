@@ -1,15 +1,13 @@
 from unittest.mock import AsyncMock
 
+from fastapi import HTTPException
 from httpx import AsyncClient
 from langchain_core.messages import AIMessage, ToolCall
-from langgraph.checkpoint.memory import InMemorySaver
 from pytest import MonkeyPatch
 
-from studylife_ai.agent.graph import build_agent
-from studylife_ai.agent.tools import build_tools
-from studylife_ai.config import get_settings
-from studylife_ai.main import app
+from studylife_ai.config import Settings
 from studylife_ai.studylife.models import StudySessionDto
+from tests.conftest import TEST_USER_ID
 from tests.fakes import FakeToolCallingModel
 
 _CREATE_SESSION_CALL = ToolCall(
@@ -25,8 +23,26 @@ _CREATE_SESSION_CALL = ToolCall(
 )
 
 
+def _agent_settings(**overrides: object) -> Settings:
+    defaults: dict[str, object] = {"studylife_api_base_url": "http://studylife.test"}
+    defaults.update(overrides)
+    return Settings(**defaults)  # type: ignore[arg-type]
+
+
 def _install_fake_agent(monkeypatch: MonkeyPatch, responses: list[AIMessage]) -> AsyncMock:
+    """Stands in for the two things api/agent.py._build_agent()
+    constructs per request: the StudyLifeClient (a fake, so tool calls never
+    hit real HTTP) and the model bound inside build_agent() (ChatLiteLLM,
+    swapped for a scripted fake). The checkpointer itself is NOT faked here -
+    api/agent.py reads the real one the app's lifespan already builds
+    (see main.py), which is fine across tests since each uses a fresh random
+    thread_id."""
     fake_studylife = AsyncMock()
+    # api/agent.py uses `async with StudyLifeClient(...) as studylife_client:`
+    # - AsyncMock's default __aenter__ return value is a DIFFERENT auto-mock,
+    # not this instance, so assertions like create_session.assert_awaited_once()
+    # below would silently check the wrong object without this.
+    fake_studylife.__aenter__.return_value = fake_studylife
     fake_studylife.create_session.return_value = StudySessionDto(
         id=99,
         course_id=6,
@@ -34,15 +50,12 @@ def _install_fake_agent(monkeypatch: MonkeyPatch, responses: list[AIMessage]) ->
         start_time="2026-08-12T10:00:00",  # type: ignore[arg-type]
         end_time="2026-08-12T11:00:00",  # type: ignore[arg-type]
     )
-    tools = build_tools(studylife=fake_studylife, store=AsyncMock(), settings=get_settings())
     fake_model = FakeToolCallingModel(responses=responses)
     # build_agent has no model= override - ChatLiteLLM is constructed inside
     # it, so swap that constructor for the duration of this build() call.
     monkeypatch.setattr("studylife_ai.agent.graph.ChatLiteLLM", lambda **kwargs: fake_model)
-    checkpointer = InMemorySaver()
-    compiled = build_agent(tools=tools, checkpointer=checkpointer, settings=get_settings())
-    monkeypatch.setattr(app.state, "agent", compiled, raising=False)
-    monkeypatch.setattr(app.state, "agent_checkpointer", checkpointer, raising=False)
+    monkeypatch.setattr("studylife_ai.api.agent.StudyLifeClient", lambda **kwargs: fake_studylife)
+    monkeypatch.setattr("studylife_ai.api.agent.get_settings", _agent_settings)
     return fake_studylife
 
 
@@ -126,20 +139,67 @@ async def test_agent_confirm_with_unknown_thread_id_returns_404(
     _install_fake_agent(monkeypatch, [AIMessage(content="irrelevant")])
 
     response = await client.post(
-        "/agent/confirm", json={"thread_id": "does-not-exist", "decision": "approve"}
+        "/agent/confirm",
+        json={"thread_id": f"{TEST_USER_ID}:does-not-exist", "decision": "approve"},
     )
 
     assert response.status_code == 404
 
 
+async def test_agent_confirm_rejects_a_thread_belonging_to_another_user(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """The thread_id ownership check (see docs/decisions.md "M4.5 Multi-user
+    support") must reject before the checkpointer is ever touched - a
+    mismatched user_id prefix is enough, regardless of whether the thread
+    even exists."""
+    _install_fake_agent(monkeypatch, [AIMessage(content="irrelevant")])
+
+    response = await client.post(
+        "/agent/confirm",
+        json={"thread_id": "someone-else:whatever", "decision": "approve"},
+    )
+
+    assert response.status_code == 403
+
+
 async def test_agent_returns_503_when_not_configured(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app.state, "agent", None, raising=False)
+    monkeypatch.setattr(
+        "studylife_ai.api.agent.get_settings",
+        lambda: _agent_settings(studylife_api_base_url=None),
+    )
 
     response = await client.post("/agent", json={"message": "hi"})
 
     assert response.status_code == 503
+
+
+async def test_agent_returns_401_when_identity_headers_are_missing(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        "/agent",
+        json={"message": "hi"},
+        headers={"X-StudyLife-User-Id": "", "X-StudyLife-Ai-Key": ""},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_agent_returns_401_when_ai_api_key_is_invalid(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    async def fake_verify_identity(*args: object, **kwargs: object) -> None:
+        raise HTTPException(status_code=401, detail="Invalid AiApiKey.")
+
+    monkeypatch.setattr("studylife_ai.api.agent.get_settings", _agent_settings)
+    monkeypatch.setattr("studylife_ai.api.agent.verify_identity", fake_verify_identity)
+
+    response = await client.post("/agent", json={"message": "hi"})
+
+    assert response.status_code == 401
 
 
 async def test_agent_confirm_surfaces_all_pending_actions_in_one_turn(
