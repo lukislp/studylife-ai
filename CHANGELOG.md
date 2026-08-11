@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/lukislp/studylife-ai/compare/v1.2.0...v1.2.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** always name the course explicitly for session/course/goal answers ([5572a71](https://github.com/lukislp/studylife-ai/commit/5572a718c15e64970f9e9d817e3a80bf949a8ca0))
+
 # [1.2.0](https://github.com/lukislp/studylife-ai/compare/v1.1.3...v1.2.0) (2026-08-11)
 
 
