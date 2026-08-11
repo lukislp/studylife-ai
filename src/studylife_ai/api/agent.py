@@ -52,7 +52,11 @@ async def _studylife_client_for(
     ai_api_key = await http_request.app.state.registered_key_store.get(identity.user_id)
     if ai_api_key is None:
         raise HTTPException(status_code=404, detail=_NO_KEY_REGISTERED_DETAIL)
-    return StudyLifeClient(base_url=settings.studylife_api_base_url, api_key=ai_api_key)
+    return StudyLifeClient(
+        base_url=settings.studylife_api_base_url,
+        api_key=ai_api_key,
+        ca_cert_path=settings.studylife_ca_cert_path,
+    )
 
 
 def _build_agent(

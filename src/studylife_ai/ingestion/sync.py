@@ -137,6 +137,7 @@ async def _sync_user(
     async with StudyLifeClient(
         base_url=settings.studylife_api_base_url,  # type: ignore[arg-type]
         api_key=ai_api_key,
+        ca_cert_path=settings.studylife_ca_cert_path,
     ) as studylife:
         # Four independent endpoints - fetch concurrently rather than
         # paying each round-trip in series.

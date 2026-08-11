@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # docs/decisions.md "M4.5 Multi-user support") — no default, ingestion
     # and /agent fail loudly if unset rather than silently pointing nowhere.
     studylife_api_base_url: str | None = None
+    # Path to a CA certificate bundle to trust for `studylife_api_base_url`, in addition to the
+    # system default trust store. Unset by default (local dev: StudyLife runs on a normal
+    # publicly-trusted-or-plain-HTTP localhost setup). Set in the k3s deployment, where
+    # studylife-ai reaches StudyLife over cluster-internal HTTPS signed by StudyLife's own
+    # private cert-manager CA (see k8s/04-app.yaml) - found live: httpx's default trust store
+    # (certifi) has no reason to know a private, cluster-only CA.
+    studylife_ca_cert_path: str | None = None
     # Shared secret StudyLife signs per-request proxy tokens with (see
     # api/identity.py, docs/decisions.md "M4.5 Multi-user support" - "Auth
     # flow, take two"). Must match the same value configured on the

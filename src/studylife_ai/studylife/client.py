@@ -6,6 +6,7 @@ There is no OpenAPI spec to generate a client from; this wraps only the
 endpoints ingestion currently needs.
 """
 
+import ssl
 from types import TracebackType
 
 import httpx
@@ -26,12 +27,20 @@ class StudyLifeClient:
         api_key: str,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        ca_cert_path: str | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={"X-Api-Key": api_key},
             timeout=timeout,
             transport=transport,
+            # A path here REPLACES httpx's default (certifi) trust store with just this CA, not
+            # in addition to it - fine since this client only ever talks to StudyLife's own API
+            # (a private cert-manager CA, e.g. in the k3s deployment), never any other host.
+            # `True` (unset) keeps httpx's normal default trust store, matching local dev where
+            # StudyLife runs on plain HTTP/localhost. ssl.create_default_context(cafile=...),
+            # not the bare path string - httpx deprecated passing verify= a raw string path.
+            verify=ssl.create_default_context(cafile=ca_cert_path) if ca_cert_path else True,
         )
 
     async def get_notes(self) -> list[StudyLifeNote]:

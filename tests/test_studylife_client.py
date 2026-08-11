@@ -270,3 +270,19 @@ async def test_create_note_raises_on_http_error() -> None:
     async with _make_client(handler) as client:
         with pytest.raises(httpx.HTTPStatusError):
             await client.create_note(title="x", content="y")
+
+
+def test_ca_cert_path_is_actually_passed_to_httpx_as_the_trust_store() -> None:
+    """A nonexistent path fails client construction (FileNotFoundError from httpx's own SSL
+    context setup) - proving ca_cert_path really reaches httpx.AsyncClient's verify=, not just
+    silently ignored."""
+    with pytest.raises(FileNotFoundError):
+        StudyLifeClient(
+            base_url="http://studylife.test", api_key="secret", ca_cert_path="/no/such/file.pem"
+        )
+
+
+async def test_ca_cert_path_none_keeps_the_default_trust_store() -> None:
+    # Must not raise - None means "use httpx's normal default", matching local dev.
+    async with StudyLifeClient(base_url="http://studylife.test", api_key="secret") as client:
+        assert client is not None
