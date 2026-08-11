@@ -27,9 +27,10 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**defaults)  # type: ignore[arg-type]
 
 
-def _chunk(note_id: int, title: str, content: str) -> RetrievedChunk:
+def _chunk(entity_id: int, title: str, content: str) -> RetrievedChunk:
     return RetrievedChunk(
-        note_id=note_id,
+        content_type="note",
+        entity_id=entity_id,
         chunk_index=0,
         content=content,
         title=title,

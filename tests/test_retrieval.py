@@ -11,7 +11,8 @@ async def test_retrieve_chunks_embeds_query_and_searches_by_user(monkeypatch: Mo
     store = QdrantStore(url="http://qdrant.test:6333", collection="studylife_notes")
     expected = [
         RetrievedChunk(
-            note_id=7,
+            content_type="note",
+            entity_id=7,
             chunk_index=0,
             content="Eigenvalues are important.",
             title="Linear Algebra",

@@ -80,7 +80,8 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     chunk = RetrievedChunk(
-        note_id=1,
+        content_type="note",
+        entity_id=1,
         chunk_index=0,
         content="det(A - λI) = 0",
         title="Eigenwerte",
@@ -113,11 +114,13 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
 
     assert response.status_code == 200
     assert captured_messages[0]["role"] == "system"
-    assert "[1] Eigenwerte: det(A - λI) = 0" in captured_messages[0]["content"]
+    assert "[1] Note: Eigenwerte\ndet(A - λI) = 0" in captured_messages[0]["content"]
     assert captured_messages[1] == {"role": "user", "content": "Was sind Eigenwerte?"}
 
     events = _parse_sse_events(response.text)
-    assert events[-1] == {"sources": [{"note_id": 1, "title": "Eigenwerte", "course_id": 3}]}
+    assert events[-1] == {
+        "sources": [{"content_type": "note", "entity_id": 1, "title": "Eigenwerte", "course_id": 3}]
+    }
 
 
 async def test_chat_falls_back_to_no_context_when_retrieval_fails(

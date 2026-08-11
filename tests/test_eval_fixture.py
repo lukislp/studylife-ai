@@ -24,7 +24,7 @@ def _settings(**overrides: object) -> Settings:
 class FakeQdrantStore:
     def __init__(self) -> None:
         self.ensure_collection = AsyncMock()
-        self.replace_note = AsyncMock()
+        self.replace_entity = AsyncMock()
 
 
 def test_load_fixture_notes_parses_jsonl(tmp_path: Path) -> None:
@@ -54,10 +54,11 @@ async def test_seed_fixture_notes_chunks_embeds_and_upserts_each_note(
     await seed_fixture_notes(notes, settings=_settings(), store=store)  # type: ignore[arg-type]
 
     store.ensure_collection.assert_awaited_once_with(vector_size=2)
-    store.replace_note.assert_awaited_once()
-    _, kwargs = store.replace_note.call_args
+    store.replace_entity.assert_awaited_once()
+    _, kwargs = store.replace_entity.call_args
     assert kwargs["chunks"] == ["det(A - λI) = 0"]
-    assert kwargs["metadata"].note_id == 1
+    assert kwargs["metadata"].content_type == "note"
+    assert kwargs["metadata"].entity_id == 1
     assert kwargs["metadata"].title == "Eigenwerte"
     assert kwargs["metadata"].course_id == 6
     assert kwargs["metadata"].user_id == "primary"

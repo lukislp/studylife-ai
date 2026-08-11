@@ -11,8 +11,15 @@ told to say so honestly first, then may still attempt a general-knowledge
 answer, clearly marked as not from the notes.
 """
 
-from studylife_ai.ingestion.qdrant_store import RetrievedChunk
-from studylife_ai.schemas.chat import NoteSource
+from studylife_ai.ingestion.qdrant_store import ContentType, RetrievedChunk
+from studylife_ai.schemas.chat import Source
+
+_CONTENT_TYPE_LABELS: dict[ContentType, str] = {
+    "note": "Note",
+    "course": "Course",
+    "session": "Session",
+    "course_goal": "Goal",
+}
 
 _SYSTEM_PROMPT_TEMPLATE = (
     "You are the StudyLife AI study assistant. Answer the user's question "
@@ -39,42 +46,49 @@ def _escape_note_text(text: str) -> str:
     return text.replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _group_by_note(chunks: list[RetrievedChunk]) -> dict[int, list[RetrievedChunk]]:
-    """Group chunks by note_id, preserving first-appearance order and chunk_index order
-    within each note — the single grouping both build_context_system_message() and
-    sources_payload() build on, so a citation number `[n]` always lines up with the
-    n-th entry of the sources list (a note can retrieve more than one chunk)."""
-    grouped: dict[int, list[RetrievedChunk]] = {}
+def _group_by_source(
+    chunks: list[RetrievedChunk],
+) -> dict[tuple[ContentType, int], list[RetrievedChunk]]:
+    """Group chunks by (content_type, entity_id), preserving first-appearance order and
+    chunk_index order within each entity — the single grouping both
+    build_context_system_message() and sources_payload() build on, so a citation number
+    `[n]` always lines up with the n-th entry of the sources list. Keying on the pair,
+    not just entity_id, matters: a course and a note can share the same numeric id."""
+    grouped: dict[tuple[ContentType, int], list[RetrievedChunk]] = {}
     for chunk in chunks:
-        grouped.setdefault(chunk.note_id, []).append(chunk)
-    for note_chunks in grouped.values():
-        note_chunks.sort(key=lambda c: c.chunk_index)
+        grouped.setdefault((chunk.content_type, chunk.entity_id), []).append(chunk)
+    for entity_chunks in grouped.values():
+        entity_chunks.sort(key=lambda c: c.chunk_index)
     return grouped
 
 
 def build_context_system_message(chunks: list[RetrievedChunk]) -> str:
     """Render retrieved chunks into the system message sent alongside the chat."""
-    grouped = _group_by_note(chunks)
+    grouped = _group_by_source(chunks)
     if not grouped:
         notes_block = _NO_NOTES_FOUND
     else:
         notes_block = "\n\n".join(
-            f"[{index}] {_escape_note_text(note_chunks[0].title)}: "
-            + " [...] ".join(_escape_note_text(chunk.content) for chunk in note_chunks)
-            for index, note_chunks in enumerate(grouped.values(), start=1)
+            f"[{index}] {_CONTENT_TYPE_LABELS[content_type]}: "
+            f"{_escape_note_text(entity_chunks[0].title)}\n"
+            + " [...] ".join(_escape_note_text(chunk.content) for chunk in entity_chunks)
+            for index, ((content_type, _entity_id), entity_chunks) in enumerate(
+                grouped.items(), start=1
+            )
         )
     return _SYSTEM_PROMPT_TEMPLATE.format(notes_block=notes_block)
 
 
-def sources_payload(chunks: list[RetrievedChunk]) -> list[NoteSource]:
-    """Deterministic source list for the SSE `sources` event, one entry per note,
+def sources_payload(chunks: list[RetrievedChunk]) -> list[Source]:
+    """Deterministic source list for the SSE `sources` event, one entry per entity,
     in the same order used for the `[n]` citation numbers above."""
-    grouped = _group_by_note(chunks)
+    grouped = _group_by_source(chunks)
     return [
-        NoteSource(
-            note_id=note_id,
-            title=note_chunks[0].title,
-            course_id=note_chunks[0].course_id,
+        Source(
+            content_type=content_type,
+            entity_id=entity_id,
+            title=entity_chunks[0].title,
+            course_id=entity_chunks[0].course_id,
         )
-        for note_id, note_chunks in grouped.items()
+        for (content_type, entity_id), entity_chunks in grouped.items()
     ]

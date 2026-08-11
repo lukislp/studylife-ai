@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.chunking import chunk_text
-from studylife_ai.ingestion.qdrant_store import NoteChunkMetadata, QdrantStore
+from studylife_ai.ingestion.qdrant_store import EntityChunkMetadata, QdrantStore
 from studylife_ai.llm.embeddings import embed_texts
 
 DEFAULT_FIXTURE_PATH = Path("eval/fixture_notes.jsonl")
@@ -44,11 +44,12 @@ async def seed_fixture_notes(
         vectors = await embed_texts(chunks, model=settings.embedding_model) if chunks else []
         if vectors:
             await store.ensure_collection(vector_size=len(vectors[0]))
-        await store.replace_note(
+        await store.replace_entity(
             chunks=chunks,
             vectors=vectors,
-            metadata=NoteChunkMetadata(
-                note_id=note.id,
+            metadata=EntityChunkMetadata(
+                content_type="note",
+                entity_id=note.id,
                 title=note.title,
                 course_id=note.course_id,
                 session_id=None,

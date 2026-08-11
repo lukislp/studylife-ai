@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from studylife_ai.ingestion.qdrant_store import ContentType
+
 
 class ChatMessage(BaseModel):
     """A single message in a chat conversation."""
@@ -24,9 +26,10 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
-class NoteSource(BaseModel):
-    """One entry of the SSE `sources` event: a note that was retrieved for RAG context."""
+class Source(BaseModel):
+    """One entry of the SSE `sources` event: an entity retrieved for RAG context."""
 
-    note_id: int
+    content_type: ContentType
+    entity_id: int
     title: str
     course_id: int | None = None

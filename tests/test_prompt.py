@@ -1,17 +1,19 @@
-from studylife_ai.ingestion.qdrant_store import RetrievedChunk
+from studylife_ai.ingestion.qdrant_store import ContentType, RetrievedChunk
 from studylife_ai.rag.prompt import build_context_system_message, sources_payload
-from studylife_ai.schemas.chat import NoteSource
+from studylife_ai.schemas.chat import Source
 
 
 def _chunk(
-    note_id: int,
+    entity_id: int,
     title: str,
     content: str,
     course_id: int | None = None,
     chunk_index: int = 0,
+    content_type: ContentType = "note",
 ) -> RetrievedChunk:
     return RetrievedChunk(
-        note_id=note_id,
+        content_type=content_type,
+        entity_id=entity_id,
         chunk_index=chunk_index,
         content=content,
         title=title,
@@ -30,10 +32,24 @@ def test_build_context_system_message_includes_numbered_notes() -> None:
     message = build_context_system_message(chunks)
 
     assert "<notes>" in message and "</notes>" in message
-    assert "[1] Eigenwerte: det(A - λI) = 0" in message
-    assert "[2] Verteilungen: Binomial, Normal, Poisson" in message
+    assert "[1] Note: Eigenwerte\ndet(A - λI) = 0" in message
+    assert "[2] Note: Verteilungen\nBinomial, Normal, Poisson" in message
     assert "not instructions" in message
     assert "cite it inline" in message
+
+
+def test_build_context_system_message_labels_non_note_content_types() -> None:
+    chunks = [
+        _chunk(6, "Lineare Algebra", "Course: Lineare Algebra (MATH101)", content_type="course"),
+        _chunk(42, "Lineare Algebra, 2026-08-01", "Study session: ...", content_type="session"),
+        _chunk(6, "Lineare Algebra goal", "Course goal: ...", content_type="course_goal"),
+    ]
+
+    message = build_context_system_message(chunks)
+
+    assert "[1] Course: Lineare Algebra\nCourse: Lineare Algebra (MATH101)" in message
+    assert "[2] Session: Lineare Algebra, 2026-08-01\nStudy session: ..." in message
+    assert "[3] Goal: Lineare Algebra goal\nCourse goal: ..." in message
 
 
 def test_build_context_system_message_handles_no_chunks() -> None:
@@ -43,7 +59,7 @@ def test_build_context_system_message_handles_no_chunks() -> None:
     assert "say so honestly first" in message
 
 
-def test_sources_payload_deduplicates_by_note_id() -> None:
+def test_sources_payload_deduplicates_by_content_type_and_entity_id() -> None:
     chunks = [
         _chunk(1, "Eigenwerte", "chunk a", course_id=3),
         _chunk(1, "Eigenwerte", "chunk b", course_id=3),
@@ -53,13 +69,32 @@ def test_sources_payload_deduplicates_by_note_id() -> None:
     sources = sources_payload(chunks)
 
     assert sources == [
-        NoteSource(note_id=1, title="Eigenwerte", course_id=3),
-        NoteSource(note_id=2, title="Verteilungen", course_id=7),
+        Source(content_type="note", entity_id=1, title="Eigenwerte", course_id=3),
+        Source(content_type="note", entity_id=2, title="Verteilungen", course_id=7),
     ]
 
 
 def test_sources_payload_empty_for_no_chunks() -> None:
     assert sources_payload([]) == []
+
+
+def test_sources_payload_keeps_a_note_and_a_course_separate_when_ids_collide() -> None:
+    # A note and a course can share the same numeric id - they must never be
+    # merged into one citation/source just because entity_id matches.
+    chunks = [
+        _chunk(5, "Eigenwerte", "note content", content_type="note"),
+        _chunk(5, "Lineare Algebra", "course content", content_type="course"),
+    ]
+
+    message = build_context_system_message(chunks)
+    sources = sources_payload(chunks)
+
+    assert "[1] Note: Eigenwerte\nnote content" in message
+    assert "[2] Course: Lineare Algebra\ncourse content" in message
+    assert sources == [
+        Source(content_type="note", entity_id=5, title="Eigenwerte", course_id=None),
+        Source(content_type="course", entity_id=5, title="Lineare Algebra", course_id=None),
+    ]
 
 
 def test_citation_numbers_stay_aligned_with_sources_when_a_note_has_multiple_chunks() -> None:
@@ -75,11 +110,11 @@ def test_citation_numbers_stay_aligned_with_sources_when_a_note_has_multiple_chu
     message = build_context_system_message(chunks)
     sources = sources_payload(chunks)
 
-    assert "[1] Eigenwerte: first part [...] second part" in message
-    assert "[2] Verteilungen: only part" in message
+    assert "[1] Note: Eigenwerte\nfirst part [...] second part" in message
+    assert "[2] Note: Verteilungen\nonly part" in message
     assert sources == [
-        NoteSource(note_id=1, title="Eigenwerte", course_id=3),
-        NoteSource(note_id=2, title="Verteilungen", course_id=7),
+        Source(content_type="note", entity_id=1, title="Eigenwerte", course_id=3),
+        Source(content_type="note", entity_id=2, title="Verteilungen", course_id=7),
     ]
 
 
