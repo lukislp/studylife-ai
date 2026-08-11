@@ -13,44 +13,54 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M5 (Deployment & operations) done, Blazor chat UI done
+## Status: M1–M6 done
 
-M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is done: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), verified purely locally on this side; per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` populated automatically by StudyLife when a user generates their `AiApiKey` round out the design. The StudyLife-side proxy endpoint (`AiProxyController`) and registration wiring are built and live-verified end-to-end against a real session. M5 is done: cost/latency logging for every LLM call (see [Observability](#observability)), the local Ollama path re-verified live after M4/M4.5's changes, and k3s manifests + a second Flux GitOps source in the StudyLife repo (see [Deployment](#deployment)). Rate limiting was deliberately deferred out of this milestone, not dropped — see [docs/decisions.md](docs/decisions.md). The Blazor chat/agent UI (`AgentChatModal.razor` in the StudyLife repo, opened from the FAB speed dial) is done and live-verified extensively against production. Still open: M6 (docs polish, architecture diagram, demo material) - not started.
+M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is done: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), verified purely locally on this side; per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` populated automatically by StudyLife when a user generates their `AiApiKey` round out the design. The StudyLife-side proxy endpoint (`AiProxyController`) and registration wiring are built and live-verified end-to-end against a real session. M5 is done: cost/latency logging for every LLM call (see [Observability](#observability)), the local Ollama path re-verified live after M4/M4.5's changes, and k3s manifests + a second Flux GitOps source in the StudyLife repo (see [Deployment](#deployment)). Rate limiting was deliberately deferred out of this milestone, not dropped — see [docs/decisions.md](docs/decisions.md). The Blazor chat/agent UI (`AgentChatModal.razor` in the StudyLife repo, opened from the FAB speed dial) is done and live-verified extensively against production. M6 (docs polish, architecture diagram, demo material) is done — see the walkthrough at [docs/demo.md](docs/demo.md) and the diagram below.
+
+**Post-M5 production hardening**, all found and fixed via live testing against the real deployment, not assumed: an in-process scheduler now re-syncs every registered account every 60s (content changed via the agent or directly in StudyLife used to only reach `/chat` after a one-time or manually-triggered sync); sessions gained a real structured date field in Qdrant with a genuine range filter, replacing an approach that handed an LLM reranker the user's entire session history and asked it to read dates out of free text - that approach worked for "today" but degraded on less obvious offsets, one round even producing a fabricated session; the reranker itself moved from an unpinned-temperature `gpt-4o-mini` call to a temperature-0 `gpt-4o` call once direct testing (`kubectl exec` into the live pod, real query, real data) showed the smaller model truncating its ranking output on pools above ~40 candidates; the agent gained a system prompt (it had none beyond a date message) after silently guessing between two similarly-named real courses instead of asking; and `RETRIEVAL_TOP_K` was raised after a CI eval regression traced to four content types competing for a fixed final cut. Full writeups with the live evidence for each: [docs/decisions.md](docs/decisions.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph StudyLife["StudyLife (.NET, existing)"]
-        BlazorUI["Blazor WASM UI"]
+        BlazorUI["Blazor WASM UI\nAgentChatModal"]
+        AiProxy["AiProxyController\n(mints proxy tokens)"]
         StudyLifeAPI["ASP.NET Core REST API"]
+        StudyLifeDB[("StudyLife DB")]
     end
 
     subgraph AI["StudyLife AI (this repo)"]
         FastAPI["FastAPI service\n(SSE streaming)"]
-        Agent["LangGraph agent — M4\n(/agent, /agent/confirm)"]
-        Checkpoints[("SQLite\npending-action state — M4")]
+        Reranker["Reranker\n(date-labeled, temperature=0)"]
+        Agent["LangGraph agent\n(/agent, /agent/confirm)"]
+        Checkpoints[("SQLite\npending-action state")]
         LiteLLM["LiteLLM"]
-        Qdrant[("Qdrant\nvector DB — M2")]
-        Ingestion["Ingestion worker — M2"]
+        Qdrant[("Qdrant\nvector DB\nstructured session dates")]
+        Scheduler["Ingestion scheduler\n(every 60s, all users)"]
     end
 
     LLMProviders["API LLM providers"]
     Ollama["Ollama (local)"]
 
-    BlazorUI -- chat --> FastAPI
+    BlazorUI -- session cookie --> AiProxy
+    AiProxy -- signed proxy token --> FastAPI
+    StudyLifeAPI -- POST /internal/register-key\n(AiApiKey generated) --> FastAPI
     FastAPI --> LiteLLM
+    FastAPI -- retrieval --> Qdrant
+    FastAPI --> Reranker
+    Reranker --> LiteLLM
     FastAPI --> Agent
     Agent --> Checkpoints
-    Agent -- confirmed writes only, M4 --> StudyLifeAPI
+    Agent -- confirmed writes only --> StudyLifeAPI
     LiteLLM --> LLMProviders
     LiteLLM --> Ollama
-    Ingestion -. reads, M2 .-> StudyLifeAPI
-    Ingestion -. writes, M2 .-> Qdrant
-    FastAPI -. retrieval, M2 .-> Qdrant
+    Scheduler -- reads --> StudyLifeAPI
+    Scheduler -- writes --> Qdrant
+    StudyLifeAPI --> StudyLifeDB
 ```
 
-Dotted edges are not built yet (see roadmap). Not yet reflected here: M4.5 built a StudyLife-backend proxy endpoint (`AiProxyController` in the StudyLife repo) that `BlazorUI` will call instead of `FastAPI` directly, once the chat UI itself exists - the backend signs a short-lived proxy token identifying the logged-in user, without ever needing their `AiApiKey` (which it can't retrieve). See [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support".
+`AiProxyController` mints a short-lived, HMAC-signed proxy token identifying the logged-in user without ever needing their `AiApiKey` (which StudyLife only ever stores a hash of, never the plaintext, so it can't be forwarded) — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". The ingestion scheduler replaced a one-shot/manual-only sync: it re-syncs every registered account on a fixed interval so content changed via the agent or directly in StudyLife shows up in `/chat` within about a minute — see [Ingestion](#ingestion) and "Periodic ingestion sync".
 
 ## Quickstart
 
@@ -140,8 +150,6 @@ docker compose exec app python -m studylife_ai.ingestion
 uv run python -m studylife_ai.ingestion
 ```
 
-There's no scheduler yet — run it manually or via your own cron for now; recurring sync is a deployment concern for a later milestone.
-
 ## Agent
 
 A LangGraph agent that can act, not just answer — two tools, both requiring confirmation before they run:
@@ -182,11 +190,11 @@ Baseline (M3, pure vector search, shared top-5 across content types, Ollama embe
 | Answer Relevancy | 0.90 | 0.82 |
 | Context Precision (`LLMContextPrecisionWithoutReference`) | 0.58 | 0.92 |
 
-Context Precision is the metric this round of work targeted, and it improved substantially. Answer Relevancy dropped somewhat — not separately investigated; the embedding-model switch changing which passages the judge's own relevance model considers "relevant" is a plausible but unconfirmed explanation, flagged here rather than assumed. The remaining note-match miss (`statistik-breit`, a broad question expecting two different notes) is a known, documented limitation: both expected notes are confirmed present in the candidate pool, but 4 content types compete for 5 final slots on the same topic — a structural quota trade-off, not a bug (see [docs/decisions.md](docs/decisions.md) for the full investigation).
+Context Precision is the metric this round of work targeted, and it improved substantially. Answer Relevancy dropped somewhat — not separately investigated; the embedding-model switch changing which passages the judge's own relevance model considers "relevant" is a plausible but unconfirmed explanation, flagged here rather than assumed. At the time, the remaining note-match miss (`statistik-breit`, a broad question expecting two different notes) was a known limitation: both expected notes were confirmed present in the candidate pool, but 4 content types competed for a fixed final cut. It's since resolved (see below) - not deliberately targeted, an apparent side effect of `RETRIEVAL_TOP_K` being raised from 5 to 8 and/or the reranker model upgrade, both motivated by an unrelated bug (see [docs/decisions.md](docs/decisions.md) "Post-M5 production hardening").
 
 No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eval design").
 
-The table above is the M3 reranking-improvement story on the original 12 note-only cases. The dataset was later expanded to 17 cases to also cover `course`/`session`/`course_goal` content (see [docs/decisions.md](docs/decisions.md) "Eval-set expansion") — real local run against all 17: **100% note-match rate**, Faithfulness 0.79, Answer Relevancy 0.86, Context Precision 0.85.
+The table above is the M3 reranking-improvement story on the original 12 note-only cases. The dataset was later expanded to 17 cases to also cover `course`/`session`/`course_goal` content (see [docs/decisions.md](docs/decisions.md) "Eval-set expansion"). Most recent real local run, against the current production configuration (`RETRIEVAL_TOP_K=8`, `RERANK_MODEL=openai/gpt-4o`, `temperature=0` reranking, structured session dates) — **100% note-match rate, all 17/17 cases, including `statistik-breit`**: Faithfulness 0.795, Answer Relevancy 0.878, Context Precision (no reference) 0.834.
 
 ## Observability
 
@@ -212,8 +220,11 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [x] **M4.5** — Multi-user support: signed proxy-token identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership, a `RegisteredKeyStore` for real per-user `AiApiKey`s, and the StudyLife-side proxy endpoint (`AiProxyController`) + registration wiring — live-verified end-to-end against a real session. See [docs/decisions.md](docs/decisions.md).
 - [x] **M5** — k3s deployment, cost/latency logging, Ollama option re-verified. Rate limiting deliberately deferred, not dropped — see [docs/decisions.md](docs/decisions.md).
-- [ ] **M6** — Documentation polish, architecture diagram, demo material.
+- [x] **Post-M5 hardening** (not originally scoped, all found live) — periodic ingestion sync, structured session dates + a real Qdrant date filter, reranker temperature pinning + model upgrade, agent course-name disambiguation, retrieval top-k raised. See [docs/decisions.md](docs/decisions.md) "Post-M5 production hardening".
+- [x] **M6** — Documentation polish, architecture diagram ([Architecture](#architecture)), demo material ([docs/demo.md](docs/demo.md)).
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
+
+Not on the roadmap, deliberately not built: reliable aggregate/statistical answers ("how many sessions did I have last year") - RAG hands the LLM a bounded sample of chunks, not the full dataset, so it can't reliably count or summarize across a full year. Would need a dedicated tool querying a real StudyLife stats endpoint, not retrieval - tracked as a known gap, not started.
 
 ## Tech stack
 
@@ -226,7 +237,7 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 | Ingestion       | Python worker reading from the StudyLife REST API (from M2)    |
 | Evaluation      | RAGAS + a versioned eval set (from M3)                         |
 | Deployment      | Docker, k3s manifests, GitHub Actions CI                       |
-| Frontend        | Blazor WASM chat component in the StudyLife repo (separate step) |
+| Frontend        | Blazor WASM chat/agent modal in the StudyLife repo (done)       |
 
 ## License
 

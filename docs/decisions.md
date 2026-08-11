@@ -2,6 +2,21 @@
 
 Log of notable decisions: what was decided, alternatives considered, and why. Marked as **[owner: assistant]** for boilerplate/infra calls made per CLAUDE.md, or **[owner: user]** for calls in the assist-only areas (chunking, retrieval, prompts, agent loop, eval design, security design).
 
+## Contents
+
+- [M1 — Repository scaffold](#m1--repository-scaffold)
+- [M2 — Ingestion architecture](#m2--ingestion-architecture-planning-ahead-of-implementation)
+- [Ingestion scope expansion: courses, sessions, course goals](#ingestion-scope-expansion-courses-sessions-course-goals)
+- [M4 — Agent actions (LangGraph, confirmed writes)](#m4--agent-actions-langgraph-confirmed-writes)
+- [Retrieval quality: reranking + per-content-type quota](#retrieval-quality-reranking--per-content-type-quota)
+- [M4.5 — Multi-user support](#m45--multi-user-support)
+- [M4.5 continued — the `AiApiKey`-forwarding design turned out to be infeasible](#m45-continued--the-aiapikey-forwarding-design-turned-out-to-be-infeasible)
+- [M5 — Deployment & operations](#m5--deployment--operations)
+- [Eval-set expansion: course/session/course_goal coverage, real results](#eval-set-expansion-coursesessioncourse_goal-coverage-real-results)
+- [Post-M5 production hardening](#post-m5-production-hardening) — periodic sync, structured session dates, reranker temperature/model, agent disambiguation, retrieval top-k
+
+Each section groups dated entries; within "Post-M5 production hardening" especially, the date-handling saga (reranker date-awareness → structured session dates → deterministic labels → temperature pinning → model upgrade) is a good single-thread example of iterative root-causing against a live system - each fix confirmed or refuted the next by testing, not assumption.
+
 ## M1 — Repository scaffold
 
 ### 2026-08-10 — Package manager: uv **[owner: assistant]**
@@ -419,7 +434,7 @@ Both raised by the user while the backend redesign was in progress - not blockin
 - **Decision**: (3). Personal-scale account sizes (~56 sessions for the live test account) make "hand the reranker everything" affordable without a schema migration; `retrieval.py`'s per-content-type quota loop special-cases `session` to call `get_all_chunks()` instead of `_search_by_vector()` - the other three types (note/course/course_goal) are unaffected. `get_all_chunks()` has a `safety_cap` (default 1000) as a defensive bound against a pathological account history, not an intended limit.
 - **Consequence for eval**: motivated adding course/session questions to `eval/dataset.jsonl` with fixed dates (not "heute", which isn't reproducible across eval runs) - not yet built, tracked as a follow-up so this class of regression gets caught automatically instead of only by live testing.
 
-## 2026-08-10 Eval-set expansion: course/session/course_goal coverage, real results
+## 2026-08-11 — Eval-set expansion: course/session/course_goal coverage, real results
 
 - **Context**: the previous two entries' bugs (missing date grounding, session candidates never surviving the vector-similarity cut) both slipped through M3's eval set undetected, because that set only ever exercised `note`-type content. Follow-up from the "round 2" entry above, now closed.
 - **Decision**: extend the eval fixture and dataset to cover `course`, `session`, and `course_goal` content types, not just `note`. Reused the real ingestion path end-to-end rather than hand-rolling fixture-specific upsert logic: `ingestion/sync.py`'s `_sync_content_type` was renamed to the public `sync_content_type[T]` and called directly from `eval/fixture.py`'s new seeders (`seed_fixture_courses`/`seed_fixture_sessions`/`seed_fixture_course_goals`) with `known={}`, so the eval fixture is chunked/embedded/upserted through the exact same code path production ingestion uses - a divergent fixture-only path would risk the eval passing while production diverges.
@@ -427,6 +442,10 @@ Both raised by the user while the backend redesign was in progress - not blockin
 - **5 new eval cases** (`session-fixed-date`, `session-topic-fixed-date`, `completed-courses`, `course-grade`, `course-ects`), covering session-date relevance, course completion/grades, and course metadata - the three question types most likely to hit the newly-added content types.
 - **Real, live-verified results** (local run, `uv run python -m studylife_ai.eval`, all 17 cases): **100% note-match rate**, all cases `[OK]` including all 5 new ones and the direct regression test for today's bug (`session-fixed-date`). RAGAS scores: Faithfulness 0.7877, Answer Relevancy 0.8588, Context Precision (no reference) 0.8529.
 - **My proposal vs. yours**: I proposed the fixed-date-vs-relative-date reproducibility trade-off and drafted the new cases; you confirmed the fixed-date approach and asked me to brainstorm realistic question phrasings myself ("kurse für morgen", "wie war das letzte jahr") since you couldn't think of many - the specific phrasings above are my proposal, not yours.
+
+## Post-M5 production hardening
+
+All of the following were found live, against the real deployment, after M5 itself was marked done - not part of the original milestone scope, but real bugs/gaps surfaced by actually using the system.
 
 ### 2026-08-11 — Bug found live: `/chat` answers didn't name the course for session/course/goal hits **[owner: user]**
 - **What happened**: live test "welche Lernsessions hatten wir gestern?" answered with the session's topic but never named which course it belonged to, even though the sources list showed it - forced cross-referencing sources to know the course.
