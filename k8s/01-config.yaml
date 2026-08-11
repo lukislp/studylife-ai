@@ -3,19 +3,26 @@
 # it "configmaps" but deliberately NOT "secrets" - see k8s/02-secret.yaml for why that one stays
 # bootstrap-only.
 #
-# STUDYLIFE_API_BASE_URL carries the REAL internal hostname directly (not a placeholder) -
-# unlike studylife's own bootstrap-cluster.ps1-substituted values, this ConfigMap is
+# STUDYLIFE_API_BASE_URL carries the REAL value directly (not a placeholder) - this ConfigMap is
 # Flux-managed (see k8s/flux-deploy/kustomization.yaml), so a placeholder here would get
-# silently reapplied over any manual substitution on every reconcile. Not a secret: it's the
-# same "studylife.heim.lan" hostname already public in the studylife repo's own
-# k8s/07d-httproutes.yaml, so committing it directly costs nothing (found live: kustomize-
-# controller reverted a manually-substituted real value back to the old placeholder within
-# seconds of onboarding, see docs/decisions.md "M5 - Deployment design"). Production runs the
-# API-provider LLM/embedding path (no in-cluster Ollama - decided for this milestone: Ollama on
-# the cluster's arm64/Raspberry-Pi-class hardware isn't practical, matching the same
-# personal-.env override already made for local dev). Only what the deployed service actually
-# reads at runtime is listed here - EVAL_JUDGE_MODEL/EVAL_USER_ID are CI-only (the eval CLI
-# never runs in this Deployment) and are deliberately omitted.
+# silently reapplied over any manual substitution on every reconcile (found live once already,
+# see docs/decisions.md "M5 - Deployment design").
+#
+# Cluster-internal Service DNS, not the public https://studylife.heim.lan hostname used
+# initially: found live that studylife-ai's container has no reason to trust StudyLife's
+# internal cert-manager CA (studylife-internal-ca-issuer, a private CA - not publicly trusted),
+# so httpx failed every request with CERTIFICATE_VERIFY_FAILED. Plain HTTP, cluster-internal
+# only - no TLS hop needed at all for pure pod-to-pod traffic within the same cluster, and no
+# certificate to distribute/trust. Needs a matching NetworkPolicy on the studylife-scale side
+# (studylife repo's k8s/12-network-policies.yaml) allowing ingress from the studylife-ai
+# namespace to studylife-web on port 8080 - StudyLife's own default-deny-ingress otherwise
+# blocks it, same as it already blocks every other unlisted source.
+#
+# Production runs the API-provider LLM/embedding path (no in-cluster Ollama - decided for this
+# milestone: Ollama on the cluster's arm64/Raspberry-Pi-class hardware isn't practical, matching
+# the same personal-.env override already made for local dev). Only what the deployed service
+# actually reads at runtime is listed here - EVAL_JUDGE_MODEL/EVAL_USER_ID are CI-only (the eval
+# CLI never runs in this Deployment) and are deliberately omitted.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,7 +37,7 @@ data:
   LLM_API_BASE: ""
   LLM_REQUEST_TIMEOUT_SECONDS: "60"
 
-  STUDYLIFE_API_BASE_URL: "https://studylife.heim.lan"
+  STUDYLIFE_API_BASE_URL: "http://studylife-web.studylife-scale.svc.cluster.local"
 
   EMBEDDING_MODEL: "openai/text-embedding-3-small"
 
