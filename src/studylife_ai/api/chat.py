@@ -19,6 +19,7 @@ fully verified locally via the token signature.
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -64,7 +65,14 @@ async def _sse_event_stream(
         chunks = []
 
     context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
-    augmented_messages = [context_message, *request.messages]
+    # Without this, the model has no way to know "today" and answers relative-date questions
+    # ("what's on today/this week") against training data instead - same fix, same reasoning,
+    # as api/agent.py's identical injection (found live: /chat asserted a specific "today" that
+    # was months off). Local time, not UTC - matches StudyLife's own sessions, which store naive
+    # local timestamps (see docs/decisions.md).
+    now = datetime.now().strftime("%Y-%m-%d %H:%M, %A")
+    date_message = ChatMessage(role="system", content=f"The current date and time is {now}.")
+    augmented_messages = [context_message, date_message, *request.messages]
     # Computed once, up front, from the already-retrieved chunks — independent of
     # whether the LLM call below succeeds, so a client always learns which notes
     # were consulted, and a bug here can never be mislabeled as an LLM failure.

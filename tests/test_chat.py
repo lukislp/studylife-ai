@@ -124,7 +124,11 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
     assert response.status_code == 200
     assert captured_messages[0]["role"] == "system"
     assert "[1] Note: Eigenwerte\ndet(A - λI) = 0" in captured_messages[0]["content"]
-    assert captured_messages[1] == {"role": "user", "content": "Was sind Eigenwerte?"}
+    # A second system message injects the current date (see api/chat.py - matches api/agent.py's
+    # identical fix) so the model can answer relative-date questions correctly.
+    assert captured_messages[1]["role"] == "system"
+    assert "current date" in captured_messages[1]["content"]
+    assert captured_messages[2] == {"role": "user", "content": "Was sind Eigenwerte?"}
 
     events = _parse_sse_events(response.text)
     assert events[-1] == {

@@ -8,6 +8,7 @@ the provider choice is deliberately not made yet.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import litellm
 import pandas as pd
@@ -66,7 +67,11 @@ async def _generate_answer(
         question, store=store, settings=settings, user_id=settings.eval_user_id
     )
     context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
-    messages = [context_message, ChatMessage(role="user", content=question)]
+    # Matches /chat's own current-date injection (see api/chat.py) - keeps eval's generation
+    # faithful to what /chat actually does, rather than silently diverging from it.
+    now = datetime.now().strftime("%Y-%m-%d %H:%M, %A")
+    date_message = ChatMessage(role="system", content=f"The current date and time is {now}.")
+    messages = [context_message, date_message, ChatMessage(role="user", content=question)]
     deltas = [
         delta
         async for delta in stream_chat_completion(
