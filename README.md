@@ -8,14 +8,14 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 - **Study Assistant (RAG)** — answer questions about notes, courses, and calendar data, with citations back to the source.
 - **Study Plan Generator** — turn exam dates, ECTS targets, and availability into a weekly plan.
-- **Agent Actions (function calling)** — create sessions, start timers, summarize notes via the existing StudyLife REST API. Write actions always go through a confirmation flow.
+- **Agent Actions (function calling)** — create sessions and summarize+save notes via the existing StudyLife REST API. Write actions always go through a confirmation flow (see [Agent](#agent)).
 - **Evaluation** — a RAGAS-based eval pipeline (faithfulness, answer relevancy, context precision) running in CI.
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M3 (Eval) done
+## Status: M4 (Agent) done
 
-M1 (scaffold, `/health`, streaming `/chat`) and M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)) are done. M3 is done: a versioned RAGAS eval set runs in CI on every push to `main`, scoring the real retrieval + generation pipeline (see [Evaluation](#evaluation)). See [Roadmap](#roadmap).
+M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). See [Roadmap](#roadmap).
 
 ## Architecture
 
@@ -28,6 +28,8 @@ flowchart LR
 
     subgraph AI["StudyLife AI (this repo)"]
         FastAPI["FastAPI service\n(SSE streaming)"]
+        Agent["LangGraph agent — M4\n(/agent, /agent/confirm)"]
+        Checkpoints[("SQLite\npending-action state — M4")]
         LiteLLM["LiteLLM"]
         Qdrant[("Qdrant\nvector DB — M2")]
         Ingestion["Ingestion worker — M2"]
@@ -38,9 +40,11 @@ flowchart LR
 
     BlazorUI -- chat --> FastAPI
     FastAPI --> LiteLLM
+    FastAPI --> Agent
+    Agent --> Checkpoints
+    Agent -- confirmed writes only, M4 --> StudyLifeAPI
     LiteLLM --> LLMProviders
     LiteLLM --> Ollama
-    FastAPI -. tool calls, M4 .-> StudyLifeAPI
     Ingestion -. reads, M2 .-> StudyLifeAPI
     Ingestion -. writes, M2 .-> Qdrant
     FastAPI -. retrieval, M2 .-> Qdrant
@@ -106,11 +110,13 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
 | `RETRIEVAL_TOP_K`              | `5`                       | Number of chunks retrieved per query (fixed top-k, v1 — see [docs/decisions.md](docs/decisions.md)). |
 | `EVAL_JUDGE_MODEL`             | _(unset)_                 | LiteLLM model identifier for the RAGAS eval judge, deliberately independent of `LLM_MODEL` — see [Evaluation](#evaluation). Required to run `python -m studylife_ai.eval`. |
+| `AGENT_CHECKPOINT_DB_PATH`     | `agent_checkpoints.db`    | SQLite file storing paused agent state between a proposed write action and its confirmation — survives a service restart. See [Agent](#agent). |
 
 ## API
 
 - `GET /health` — liveness check.
 - `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks across notes, courses, sessions, and course goals (see [Retrieval design](docs/decisions.md)), injected as a system message ahead of the conversation. Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
+- `POST /agent` / `POST /agent/confirm` — tool-calling with confirmed writes, see [Agent](#agent).
 
 ## Ingestion
 
@@ -125,6 +131,29 @@ uv run python -m studylife_ai.ingestion
 ```
 
 There's no scheduler yet — run it manually or via your own cron for now; recurring sync is a deployment concern for a later milestone.
+
+## Agent
+
+A LangGraph agent that can act, not just answer — two tools, both requiring confirmation before they run:
+
+- **Create a study session** — resolves a real `course_id` first (via a read-only `list_courses` tool; StudyLife's API doesn't validate `course_id` at all, so guessing one would silently create a session against a nonexistent course), then proposes `POST /api/sessions`.
+- **Summarize and save a note** — searches your notes (`search_notes`, scoped to `content_type=note`), the model writes the summary itself, then proposes `POST /api/notes`.
+
+No write ever executes directly. `POST /agent` either answers directly or returns one or more `pending_actions` (tool name, arguments, and a `thread_id`); `POST /agent/confirm` with `{"thread_id": ..., "decision": "approve" | "reject"}` is what actually runs (or cancels) them. Paused state is checkpointed to SQLite (`AGENT_CHECKPOINT_DB_PATH`), so a pending action survives a service restart between propose and confirm — verified live, not just assumed.
+
+```bash
+curl -X POST http://localhost:8000/agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Leg mir für morgen um 14 Uhr eine 60-minütige Session für Lineare Algebra an."}'
+# -> {"answer": null, "pending_actions": [{"tool": "create_study_session", "args": {...}, "thread_id": "..."}]}
+
+curl -X POST http://localhost:8000/agent/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"thread_id": "...", "decision": "approve"}'
+# -> {"answer": "...", "pending_actions": []}
+```
+
+Requires `STUDYLIFE_API_BASE_URL`/`STUDYLIFE_API_KEY` (same as ingestion) — without them, both endpoints return `503`.
 
 ## Evaluation
 
@@ -146,7 +175,7 @@ These are the first real numbers; no CI thresholds are set yet (see [docs/decisi
 - [x] **M1** — Repo scaffold: FastAPI service with `/health` and streaming `/chat` (LiteLLM, no RAG), Docker + Compose, CI (lint + tests), README v1.
 - [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
 - [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
-- [ ] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
+- [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
@@ -156,7 +185,7 @@ These are the first real numbers; no CI thresholds are set yet (see [docs/decisi
 | Component      | Technology                                                    |
 | --------------- | --------------------------------------------------------------- |
 | Service        | Python 3.12, FastAPI, SSE streaming                           |
-| Agent framework | LangGraph (from M4)                                            |
+| Agent framework | LangGraph + LangChain (`create_agent`, `HumanInTheLoopMiddleware`) (from M4) |
 | LLM             | Provider-agnostic via LiteLLM; API models + local via Ollama   |
 | Vector DB       | Qdrant (from M2)                                                |
 | Ingestion       | Python worker reading from the StudyLife REST API (from M2)    |
