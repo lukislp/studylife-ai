@@ -13,9 +13,9 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M4.5 (Multi-user) in progress
+## Status: M4.5 (Multi-user) done
 
-M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is in progress: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` that StudyLife's backend populates automatically when a user generates their `AiApiKey` are all implemented on the `studylife-ai` side; the StudyLife-side backend proxy endpoint and registration wiring (a separate-repo change) is next — see [docs/decisions.md](docs/decisions.md).
+M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is done: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), verified purely locally on this side; per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` populated automatically by StudyLife when a user generates their `AiApiKey` round out the design. The StudyLife-side proxy endpoint (`AiProxyController`) and registration wiring are built and live-verified end-to-end against a real session — see [docs/decisions.md](docs/decisions.md). Still open: the Blazor chat UI itself (a separate step, not started).
 
 ## Architecture
 
@@ -50,7 +50,7 @@ flowchart LR
     FastAPI -. retrieval, M2 .-> Qdrant
 ```
 
-Dotted edges are not built yet (see roadmap). Not yet reflected here: M4.5 decided that `BlazorUI` will call a new StudyLife-backend proxy endpoint instead of `FastAPI` directly, so the backend can sign a short-lived proxy token identifying the logged-in user, without ever needing their `AiApiKey` (which it can't retrieve - see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support").
+Dotted edges are not built yet (see roadmap). Not yet reflected here: M4.5 built a StudyLife-backend proxy endpoint (`AiProxyController` in the StudyLife repo) that `BlazorUI` will call instead of `FastAPI` directly, once the chat UI itself exists - the backend signs a short-lived proxy token identifying the logged-in user, without ever needing their `AiApiKey` (which it can't retrieve). See [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support".
 
 ## Quickstart
 
@@ -188,7 +188,7 @@ No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eva
 - [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
 - [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
-- [ ] **M4.5** — Multi-user support: signed proxy-token identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership, a `RegisteredKeyStore` for real per-user `AiApiKey`s - done on the `studylife-ai` side. Still open: the StudyLife-side backend proxy endpoint and registration wiring (a separate-repo change) — see [docs/decisions.md](docs/decisions.md).
+- [x] **M4.5** — Multi-user support: signed proxy-token identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership, a `RegisteredKeyStore` for real per-user `AiApiKey`s, and the StudyLife-side proxy endpoint (`AiProxyController`) + registration wiring — live-verified end-to-end against a real session. See [docs/decisions.md](docs/decisions.md).
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
