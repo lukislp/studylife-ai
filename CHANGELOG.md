@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/lukislp/studylife-ai/compare/v1.3.2...v1.3.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** replace LLM date-reading for sessions with a real Qdrant date filter ([1190584](https://github.com/lukislp/studylife-ai/commit/1190584f3a956015fd16f19d1e88f9101ee75672))
+
 ## [1.3.2](https://github.com/lukislp/studylife-ai/compare/v1.3.1...v1.3.2) (2026-08-11)
 
 
