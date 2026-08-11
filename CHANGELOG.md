@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/lukislp/studylife-ai/compare/v1.3.1...v1.3.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** reranker resolves exact offsets for any relative date phrase ([e92124d](https://github.com/lukislp/studylife-ai/commit/e92124d4ed5c25ede6bdae2246d0ee49d78570fa))
+
 ## [1.3.1](https://github.com/lukislp/studylife-ai/compare/v1.3.0...v1.3.1) (2026-08-11)
 
 
