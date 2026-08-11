@@ -93,6 +93,7 @@ async def seed_fixture_notes(
                 session_id=None,
                 user_id=settings.eval_user_id,
                 fingerprint="fixture",
+                session_start=None,
             ),
         )
 
@@ -113,6 +114,7 @@ async def seed_fixture_courses(
         title=lambda c: c.name,
         course_id=lambda _c: None,
         session_id=lambda _c: None,
+        session_start=lambda _c: None,
     )
 
 
@@ -132,6 +134,7 @@ async def seed_fixture_sessions(
         title=lambda s: f"{s.course_name}, {s.start_time.strftime('%Y-%m-%d %H:%M')}",
         course_id=lambda s: s.course_id,
         session_id=lambda _s: None,
+        session_start=lambda s: s.start_time.isoformat(),
     )
 
 
@@ -151,4 +154,5 @@ async def seed_fixture_course_goals(
         title=lambda g: f"{g.course_name} goal",
         course_id=lambda g: g.course_id,
         session_id=lambda _g: None,
+        session_start=lambda _g: None,
     )

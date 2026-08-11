@@ -210,6 +210,31 @@ async def test_sync_ingests_new_session(monkeypatch: MonkeyPatch) -> None:
     assert kwargs["metadata"].content_type == "session"
     assert kwargs["metadata"].entity_id == 42
     assert kwargs["metadata"].course_id == 6
+    assert kwargs["metadata"].session_start == "2026-08-01T10:00:00"
+
+
+async def test_sync_reingests_a_session_whose_fingerprint_predates_the_schema_bump(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Migration regression test (see docs/decisions.md "Structured session dates"):
+    fingerprint_session() was bumped with a schema marker specifically so an
+    already-ingested session (whose stored fingerprint is the pre-bump hash) looks "changed" on
+    the next sync and gets re-upserted with the new session_start field - otherwise it would
+    never get backfilled, since its actual content never changed."""
+    import hashlib
+
+    from studylife_ai.ingestion.rendering import render_session
+
+    session = _session(42, course_id=6)
+    pre_migration_fingerprint = hashlib.sha256(render_session(session).encode()).hexdigest()
+    fake_client = FakeStudyLifeClient(sessions=[session])
+    fake_store = FakeQdrantStore(known={("session", 42): pre_migration_fingerprint})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.replace_entity.assert_awaited_once()
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].session_start == "2026-08-01T10:00:00"
 
 
 async def test_sync_ingests_new_course_goal_keyed_by_course_id(monkeypatch: MonkeyPatch) -> None:

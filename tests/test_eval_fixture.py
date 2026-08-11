@@ -166,6 +166,7 @@ async def test_seed_fixture_sessions_titles_by_course_name_and_start_time(
     assert kwargs["metadata"].content_type == "session"
     assert kwargs["metadata"].title == "Algorithmen, 2026-08-11 16:00"
     assert kwargs["metadata"].course_id == 1
+    assert kwargs["metadata"].session_start == "2026-08-11T16:00:00"
 
 
 async def test_seed_fixture_course_goals_titles_with_goal_suffix(

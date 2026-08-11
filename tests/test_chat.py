@@ -97,6 +97,7 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
         course_id=3,
         session_id=None,
         score=0.9,
+        session_start=None,
     )
 
     async def fake_retrieve_context(

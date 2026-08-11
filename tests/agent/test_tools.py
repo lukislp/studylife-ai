@@ -63,6 +63,7 @@ async def test_search_notes_filters_to_note_content_type(monkeypatch: MonkeyPatc
                 course_id=None,
                 session_id=None,
                 score=0.9,
+                session_start=None,
             )
         ]
 

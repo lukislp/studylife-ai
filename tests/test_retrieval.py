@@ -1,3 +1,4 @@
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 from pytest import MonkeyPatch
@@ -5,7 +6,7 @@ from pytest import MonkeyPatch
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.rag import retrieval as retrieval_module
-from studylife_ai.rag.retrieval import retrieve_with_rerank
+from studylife_ai.rag.retrieval import _fetch_sessions, retrieve_with_rerank
 
 
 def _settings(**overrides: object) -> Settings:
@@ -14,6 +15,7 @@ def _settings(**overrides: object) -> Settings:
         "retrieval_top_k": 5,
         "rerank_candidate_k": 20,
         "rerank_model": None,
+        "session_window_days": 14,
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -29,10 +31,11 @@ def _chunk_of_type(entity_id: int, title: str, content_type: str, score: float) 
         course_id=None,
         session_id=None,
         score=score,
+        session_start=None,
     )
 
 
-async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type_except_session(
+async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type(
     monkeypatch: MonkeyPatch,
 ) -> None:
     fetched_types: list[object] = []
@@ -42,35 +45,8 @@ async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type_excep
         assert kwargs["top_k"] == 5  # rerank_candidate_k=20 // 4 types
         return []
 
-    async def fake_embed_texts(
-        texts: list[str], *, model: str, **_kwargs: object
-    ) -> list[list[float]]:
-        return [[0.1, 0.2]]
-
-    monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
-    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
-
-    await retrieve_with_rerank(
-        "query", store=AsyncMock(), settings=_settings(rerank_model=None), user_id="primary"
-    )
-
-    # session deliberately does NOT go through the per-type vector-similarity quota (see
-    # retrieval.py's module docstring / QdrantStore.get_all_chunks) - covered separately below.
-    assert set(fetched_types) == {"note", "course", "course_goal"}
-    assert len(fetched_types) == 3
-
-
-async def test_retrieve_with_rerank_fetches_every_session_via_get_all_chunks(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
         return []
-
-    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
-        calls.append(kwargs)
-        return [_chunk_of_type(1, "today's session", "session", 0.0)]
 
     async def fake_embed_texts(
         texts: list[str], *, model: str, **_kwargs: object
@@ -80,14 +56,54 @@ async def test_retrieve_with_rerank_fetches_every_session_via_get_all_chunks(
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
     store = AsyncMock()
-    store.get_all_chunks = fake_get_all_chunks
+    store.get_sessions_in_window = fake_get_sessions_in_window
 
-    result = await retrieve_with_rerank(
+    await retrieve_with_rerank(
         "query", store=store, settings=_settings(rerank_model=None), user_id="primary"
     )
 
-    assert calls == [{"user_id": "primary", "content_type": "session"}]
-    assert [c.title for c in result] == ["today's session"]
+    # Every content type, including session's topic-fallback pool, goes through the same
+    # per-type vector-similarity quota - session additionally gets a date-window fetch,
+    # covered separately below (see docs/decisions.md "Structured session dates").
+    assert set(fetched_types) == {"note", "course", "course_goal", "session"}
+    assert len(fetched_types) == 4
+
+
+async def test_fetch_sessions_merges_window_and_topic_pools_deduped_by_entity_id(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    window_calls: list[dict[str, object]] = []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        # entity_id=1 also appears in the window pool below - must not be duplicated.
+        return [
+            _chunk_of_type(1, "window session (topic-matched too)", "session", 0.8),
+            _chunk_of_type(2, "topic-only session", "session", 0.5),
+        ]
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        window_calls.append(kwargs)
+        return [_chunk_of_type(1, "window session", "session", 0.0)]
+
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    result = await _fetch_sessions(
+        [0.1, 0.2], store=store, user_id="primary", settings=_settings(), top_k=5
+    )
+
+    # entity_id=1: window pool wins (listed first, its title survives) over the topic pool's
+    # duplicate. entity_id=2 (topic-only) is still included.
+    assert [(c.entity_id, c.title) for c in result] == [
+        (1, "window session"),
+        (2, "topic-only session"),
+    ]
+    assert len(window_calls) == 1
+    assert window_calls[0]["user_id"] == "primary"
+    start, end = window_calls[0]["start"], window_calls[0]["end"]
+    assert isinstance(start, datetime) and isinstance(end, datetime)
+    assert (end - start).days == 28  # 2 * session_window_days=14
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
@@ -97,12 +113,13 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
         "note": [_chunk_of_type(1, "note-hi", "note", 0.5)],
         "course": [_chunk_of_type(2, "course-hi", "course", 0.9)],
         "course_goal": [_chunk_of_type(4, "goal-mid", "course_goal", 0.6)],
+        "session": [],
     }
 
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
         return per_type_results[kwargs["content_type"]]
 
-    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
         return [_chunk_of_type(3, "session-lo", "session", 0.1)]
 
     async def fake_embed_texts(
@@ -117,7 +134,7 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
     monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
     store = AsyncMock()
-    store.get_all_chunks = fake_get_all_chunks
+    store.get_sessions_in_window = fake_get_sessions_in_window
 
     result = await retrieve_with_rerank(
         "query",
@@ -132,13 +149,18 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
 async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    candidates = [_chunk_of_type(i, f"chunk-{i}", "note", 0.5) for i in range(4)]
+    per_type_results = {
+        "note": [_chunk_of_type(0, "chunk-0", "note", 0.5)],
+        "course": [_chunk_of_type(1, "chunk-1", "course", 0.5)],
+        "course_goal": [_chunk_of_type(2, "chunk-2", "course_goal", 0.5)],
+        "session": [],
+    }
 
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
-        return [candidates.pop(0)] if candidates else []
+        return per_type_results[kwargs["content_type"]]
 
-    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
-        return [candidates.pop(0)] if candidates else []
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return [_chunk_of_type(3, "chunk-3", "session", 0.0)]
 
     async def fake_embed_texts(
         texts: list[str], *, model: str, **_kwargs: object
@@ -154,7 +176,7 @@ async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
     monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
     store = AsyncMock()
-    store.get_all_chunks = fake_get_all_chunks
+    store.get_sessions_in_window = fake_get_sessions_in_window
 
     result = await retrieve_with_rerank(
         "query",
@@ -226,6 +248,7 @@ async def test_a_single_content_types_search_failure_does_not_abort_the_others(
         ]
 
     store.search = AsyncMock(side_effect=fake_search)  # type: ignore[method-assign]
+    store.get_sessions_in_window = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
     async def fake_embed_texts(
         texts: list[str], *, model: str, **_kwargs: object
@@ -238,4 +261,7 @@ async def test_a_single_content_types_search_failure_does_not_abort_the_others(
         "query", store=store, settings=_settings(rerank_model=None), user_id="primary"
     )
 
+    # session's own vector-search leg fails (like every other type's would), but that's caught
+    # by _search_by_vector's own never-raises contract - the window leg (mocked empty here)
+    # still runs fine, so session contributes nothing rather than aborting the whole retrieval.
     assert {c.content_type for c in result} == {"note", "course", "course_goal"}

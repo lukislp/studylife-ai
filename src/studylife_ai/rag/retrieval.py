@@ -6,18 +6,21 @@ per-content-type candidate quota instead of one global top-k - without this,
 a single popular course's ~90 near-duplicate session chunks can crowd a
 genuinely relevant note out of the running entirely, confirmed live - then
 optionally reranks the merged pool with an LLM when `Settings.rerank_model`
-is set. `session` is the one exception to the quota: it bypasses vector
-search entirely and fetches every one of the user's sessions instead (see
-`QdrantStore.get_all_chunks()`, docs/decisions.md "Retrieval design") - a
-text embedding has no way to rank a session by date proximity to "today",
-so a similarity top-k can permanently exclude the one session that's
-actually relevant to a date-relative question, before reranking ever gets a
-chance to judge it.
+is set. `session` is the one exception to the quota: instead of one
+per-type vector-search slice, it gets two merged pools - a real Qdrant
+DatetimeRange window around "today" (`QdrantStore.get_sessions_in_window()`)
+for near-term date questions, plus a normal topic-vector search over ALL
+sessions for farther-out topic questions (see docs/decisions.md "Structured
+session dates"). The window replaced an earlier "fetch every session, let
+the reranker sort it out in free text" approach - confirmed live that an LLM
+reading exact dates out of dozens of near-identical passages is unreliable
+for anything but the most obvious offsets ("today"), while a real database
+range filter isn't.
 """
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import get_args
 
 from studylife_ai.config import Settings
@@ -51,15 +54,38 @@ async def _search_by_vector(
         return []
 
 
-async def _fetch_all(
-    store: QdrantStore, *, user_id: str, content_type: ContentType
+async def _fetch_session_window(
+    store: QdrantStore, *, user_id: str, window_days: int
 ) -> list[RetrievedChunk]:
-    """Same never-raises contract as `_search_by_vector` above, for `get_all_chunks()`."""
+    """Same never-raises contract as `_search_by_vector` above, for `get_sessions_in_window()`."""
+    now = datetime.now()
     try:
-        return await store.get_all_chunks(user_id=user_id, content_type=content_type)
+        return await store.get_sessions_in_window(
+            user_id=user_id,
+            start=now - timedelta(days=window_days),
+            end=now + timedelta(days=window_days),
+        )
     except Exception:
-        logger.exception("Qdrant scroll failed for content_type=%s", content_type)
+        logger.exception("Qdrant session-window scroll failed")
         return []
+
+
+async def _fetch_sessions(
+    vector: list[float], *, store: QdrantStore, user_id: str, settings: Settings, top_k: int
+) -> list[RetrievedChunk]:
+    """Sessions' two-pool fetch: the date-window above, plus a normal topic-vector search over
+    ALL sessions (same `top_k` quota every other content type gets) so a question like "what did
+    we cover in Analysis last year" - no near-term date in it at all - still finds something.
+    Merged and deduped by `entity_id`, window pool first (it's the one actually relevant to
+    date-specific questions, which is the common case this whole design targets)."""
+    window_chunks, topic_chunks = await asyncio.gather(
+        _fetch_session_window(store, user_id=user_id, window_days=settings.session_window_days),
+        _search_by_vector(
+            vector, store=store, user_id=user_id, top_k=top_k, content_type="session"
+        ),
+    )
+    seen_ids = {c.entity_id for c in window_chunks}
+    return window_chunks + [c for c in topic_chunks if c.entity_id not in seen_ids]
 
 
 async def retrieve_with_rerank(
@@ -104,15 +130,14 @@ async def retrieve_with_rerank(
         )
     else:
         per_type_k = max(1, settings.rerank_candidate_k // len(_CONTENT_TYPES))
-        # "session" bypasses the vector-similarity quota entirely (see
-        # QdrantStore.get_all_chunks docstring) - a text embedding has no way to know a
-        # session's date is close to today, so the top-k-by-similarity slice can permanently
-        # exclude the one session that's actually relevant to a "what's on today?"-style
-        # question, before the (date-aware, see rag/rerank.py) reranker ever gets a chance to
-        # judge it. Personal-scale account sizes make "hand the reranker everything" affordable.
+        # "session" gets the two-pool fetch above instead of a plain vector-similarity quota -
+        # see QdrantStore.get_sessions_in_window() and _fetch_sessions() docstrings for why a
+        # text embedding alone can't be trusted to rank sessions by date proximity to "today".
         results = await asyncio.gather(
             *(
-                _fetch_all(store, user_id=user_id, content_type=ct)
+                _fetch_sessions(
+                    vector, store=store, user_id=user_id, settings=settings, top_k=per_type_k
+                )
                 if ct == "session"
                 else _search_by_vector(
                     vector,

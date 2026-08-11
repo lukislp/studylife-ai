@@ -16,11 +16,18 @@ colliding, and so can two different users' entities (see docs/decisions.md
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from qdrant_client import AsyncQdrantClient, models
 
 ContentType = Literal["note", "course", "session", "course_goal"]
+
+# Payload field name for a session's start time (see docs/decisions.md
+# "Structured session dates"). Indexed as DATETIME in ensure_collection() so
+# get_sessions_in_window() can filter by a real Qdrant range query instead of
+# relying on an LLM to read dates out of free text.
+SESSION_START_FIELD = "session_start"
 
 
 @dataclass
@@ -32,6 +39,10 @@ class EntityChunkMetadata:
     session_id: int | None
     user_id: str
     fingerprint: str
+    # ISO 8601 (naive local time, matching StudyLife's own session timestamps
+    # - see docs/decisions.md), set only for content_type="session". None for
+    # every other content type.
+    session_start: str | None
 
 
 @dataclass
@@ -44,10 +55,31 @@ class RetrievedChunk:
     course_id: int | None
     session_id: int | None
     score: float
+    session_start: str | None
 
 
 def _user_id_condition(user_id: str) -> models.FieldCondition:
     return models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+
+
+def _chunk_from_payload(payload: dict[str, object], *, score: float) -> RetrievedChunk:
+    """Shared field mapping for the three read paths below (get_all_chunks,
+    get_sessions_in_window, search) - `score` is the one field each computes
+    differently (0.0 for a plain scroll, a real similarity score for vector
+    search)."""
+    return RetrievedChunk(
+        content_type=payload["content_type"],  # type: ignore[arg-type]
+        entity_id=payload["entity_id"],  # type: ignore[arg-type]
+        chunk_index=payload["chunk_index"],  # type: ignore[arg-type]
+        content=payload["content"],  # type: ignore[arg-type]
+        title=payload["title"],  # type: ignore[arg-type]
+        course_id=payload["course_id"],  # type: ignore[arg-type]
+        session_id=payload["session_id"],  # type: ignore[arg-type]
+        score=score,
+        # .get(), not [] - a point ingested before this field existed won't have it until its
+        # next sync (see fingerprint_session()'s migration bump in ingestion/sync.py).
+        session_start=payload.get(SESSION_START_FIELD),  # type: ignore[arg-type]
+    )
 
 
 class QdrantStore:
@@ -62,11 +94,20 @@ class QdrantStore:
         return await self._client.collection_exists(self._collection)
 
     async def ensure_collection(self, vector_size: int) -> None:
-        if await self.collection_exists():
-            return
-        await self._client.create_collection(
+        if not await self.collection_exists():
+            await self._client.create_collection(
+                collection_name=self._collection,
+                vectors_config=models.VectorParams(
+                    size=vector_size, distance=models.Distance.COSINE
+                ),
+            )
+        # Idempotent - safe to call on every sync, not just at collection creation, so an
+        # already-existing collection (every real deployment, pre-dating this field) also gets
+        # the index the first time ensure_collection() runs after upgrading.
+        await self._client.create_payload_index(
             collection_name=self._collection,
-            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
+            field_name=SESSION_START_FIELD,
+            field_schema=models.PayloadSchemaType.DATETIME,
         )
 
     async def get_known_fingerprints(self, *, user_id: str) -> dict[tuple[str, int], str]:
@@ -140,22 +181,59 @@ class QdrantStore:
                 payload = point.payload or {}
                 if not payload:
                     continue
-                chunks.append(
-                    RetrievedChunk(
-                        content_type=payload["content_type"],
-                        entity_id=payload["entity_id"],
-                        chunk_index=payload["chunk_index"],
-                        content=payload["content"],
-                        title=payload["title"],
-                        course_id=payload["course_id"],
-                        session_id=payload["session_id"],
-                        # No similarity score for a scroll fetch - 0.0 sorts these last in the
-                        # naive score-only fallback ordering used when rerank_model is unset;
-                        # harmless there (that path never claimed date-awareness either) and
-                        # irrelevant once reranking is active, which is what this exists for.
-                        score=0.0,
-                    )
-                )
+                # No similarity score for a scroll fetch - 0.0 sorts these last in the naive
+                # score-only fallback ordering used when rerank_model is unset; harmless there
+                # (that path never claimed date-awareness either) and irrelevant once reranking
+                # is active, which is what this exists for.
+                chunks.append(_chunk_from_payload(payload, score=0.0))
+            if offset is None:
+                break
+        return chunks[:safety_cap]
+
+    async def get_sessions_in_window(
+        self, *, user_id: str, start: datetime, end: datetime, safety_cap: int = 1000
+    ) -> list[RetrievedChunk]:
+        """Every session chunk whose `session_start` falls within `[start, end]`, via a real
+        Qdrant DatetimeRange filter on the indexed field - not text the reranker has to
+        interpret (see docs/decisions.md "Structured session dates"). `retrieve_with_rerank()`
+        calls this with a window centered on "today" for the common near-term case ("what's on
+        tomorrow/this week"), merged with a plain topic-vector search over ALL sessions so
+        farther-out topic questions ("what did we cover in Analysis last year") still work -
+        this method alone only ever returns what's inside the window, by design.
+
+        Points from before this field existed (`session_start` missing entirely) never match a
+        DatetimeRange filter and are silently excluded here - they'll appear once their next
+        sync backfills the field (see fingerprint_session()'s migration bump).
+        """
+        if not await self.collection_exists():
+            return []
+        chunks: list[RetrievedChunk] = []
+        offset = None
+        while len(chunks) < safety_cap:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        _user_id_condition(user_id),
+                        models.FieldCondition(
+                            key="content_type", match=models.MatchValue(value="session")
+                        ),
+                        models.FieldCondition(
+                            key=SESSION_START_FIELD,
+                            range=models.DatetimeRange(gte=start, lte=end),
+                        ),
+                    ]
+                ),
+                with_payload=True,
+                with_vectors=False,
+                limit=256,
+                offset=offset,
+            )
+            for point in points:
+                payload = point.payload or {}
+                if not payload:
+                    continue
+                chunks.append(_chunk_from_payload(payload, score=0.0))
             if offset is None:
                 break
         return chunks[:safety_cap]
@@ -189,6 +267,7 @@ class QdrantStore:
                     "session_id": metadata.session_id,
                     "user_id": metadata.user_id,
                     "fingerprint": metadata.fingerprint,
+                    SESSION_START_FIELD: metadata.session_start,
                 },
             )
             for index, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
@@ -230,16 +309,7 @@ class QdrantStore:
             with_payload=True,
         )
         return [
-            RetrievedChunk(
-                content_type=point.payload["content_type"],
-                entity_id=point.payload["entity_id"],
-                chunk_index=point.payload["chunk_index"],
-                content=point.payload["content"],
-                title=point.payload["title"],
-                course_id=point.payload["course_id"],
-                session_id=point.payload["session_id"],
-                score=point.score,
-            )
+            _chunk_from_payload(point.payload, score=point.score)
             for point in response.points
             if point.payload is not None
         ]

@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # already skips anything unchanged, so a 60s full-catalog pass only ever
     # pays for what actually changed since the last tick.
     ingestion_sync_interval_seconds: int = 60
+    # Half-width (in days) of the "near today" session date-window retrieve_with_rerank() fetches
+    # via a real Qdrant DatetimeRange filter (see docs/decisions.md "Structured session dates") -
+    # comfortably covers today/tomorrow/day-after-tomorrow/yesterday/day-before-yesterday and
+    # this/next/last week without handing the reranker the full session history to sort through
+    # in free text. Doesn't limit topic-based session questions ("what did we cover in Analysis
+    # last year") - those still go through the separate, unwindowed vector-search fallback.
+    session_window_days: int = 14
 
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.

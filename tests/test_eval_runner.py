@@ -37,6 +37,7 @@ def _chunk(entity_id: int, title: str, content: str) -> RetrievedChunk:
         course_id=None,
         session_id=None,
         score=0.9,
+        session_start=None,
     )
 
 

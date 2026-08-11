@@ -20,6 +20,7 @@ def _chunk(
         course_id=course_id,
         session_id=None,
         score=0.9,
+        session_start=None,
     )
 
 

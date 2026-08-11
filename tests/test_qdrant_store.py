@@ -12,6 +12,7 @@ async def test_ensure_collection_creates_when_missing() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=False)
     store._client.create_collection = AsyncMock()
+    store._client.create_payload_index = AsyncMock()
 
     await store.ensure_collection(vector_size=768)
 
@@ -25,10 +26,30 @@ async def test_ensure_collection_skips_when_already_exists() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
     store._client.create_collection = AsyncMock()
+    store._client.create_payload_index = AsyncMock()
 
     await store.ensure_collection(vector_size=768)
 
     store._client.create_collection.assert_not_awaited()
+
+
+async def test_ensure_collection_always_ensures_the_session_start_index() -> None:
+    """Idempotent by design (see qdrant_store.py) - runs every call, not just on first
+    creation, so an already-existing collection (every real deployment predating this field)
+    also gets indexed the first time this runs after upgrading."""
+    from studylife_ai.ingestion.qdrant_store import SESSION_START_FIELD
+
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    store._client.create_collection = AsyncMock()
+    store._client.create_payload_index = AsyncMock()
+
+    await store.ensure_collection(vector_size=768)
+
+    store._client.create_payload_index.assert_awaited_once()
+    _, kwargs = store._client.create_payload_index.call_args
+    assert kwargs["collection_name"] == "studylife_notes"
+    assert kwargs["field_name"] == SESSION_START_FIELD
 
 
 async def test_get_known_fingerprints_returns_empty_when_collection_missing() -> None:
@@ -106,6 +127,114 @@ async def test_get_all_chunks_paginates_filters_by_type_and_scores_zero() -> Non
     assert conditions[1].match.value == "session"
 
 
+async def test_get_all_chunks_reads_session_start_when_present() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    point = SimpleNamespace(
+        payload={
+            "content_type": "session",
+            "entity_id": 1,
+            "chunk_index": 0,
+            "content": "content-1",
+            "title": "Session A",
+            "course_id": None,
+            "session_id": None,
+            "session_start": "2026-08-13T18:00:00",
+        }
+    )
+    store._client.scroll = AsyncMock(return_value=([point], None))
+
+    result = await store.get_all_chunks(user_id="primary", content_type="session")
+
+    assert result[0].session_start == "2026-08-13T18:00:00"
+
+
+async def test_get_sessions_in_window_returns_empty_when_collection_missing() -> None:
+    from datetime import datetime
+
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=False)
+
+    result = await store.get_sessions_in_window(
+        user_id="primary", start=datetime(2026, 8, 1), end=datetime(2026, 8, 28)
+    )
+
+    assert result == []
+
+
+async def test_get_sessions_in_window_filters_by_user_type_and_datetime_range() -> None:
+    from datetime import datetime
+
+    from studylife_ai.ingestion.qdrant_store import SESSION_START_FIELD
+
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    point = SimpleNamespace(
+        payload={
+            "content_type": "session",
+            "entity_id": 1,
+            "chunk_index": 0,
+            "content": "content-1",
+            "title": "Session in window",
+            "course_id": None,
+            "session_id": None,
+            "session_start": "2026-08-12T16:00:00",
+        }
+    )
+    store._client.scroll = AsyncMock(return_value=([point], None))
+
+    start = datetime(2026, 7, 28)
+    end = datetime(2026, 8, 25)
+    result = await store.get_sessions_in_window(user_id="primary", start=start, end=end)
+
+    assert [c.title for c in result] == ["Session in window"]
+    _, kwargs = store._client.scroll.call_args
+    conditions = kwargs["scroll_filter"].must
+    assert conditions[0].key == "user_id"
+    assert conditions[0].match.value == "primary"
+    assert conditions[1].key == "content_type"
+    assert conditions[1].match.value == "session"
+    assert conditions[2].key == SESSION_START_FIELD
+    assert conditions[2].range.gte == start
+    assert conditions[2].range.lte == end
+
+
+async def test_get_sessions_in_window_stops_at_safety_cap() -> None:
+    from datetime import datetime
+
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+
+    def _page(offset: str | None) -> tuple[list[SimpleNamespace], str | None]:
+        points = [
+            SimpleNamespace(
+                payload={
+                    "content_type": "session",
+                    "entity_id": i,
+                    "chunk_index": 0,
+                    "content": "x",
+                    "title": f"s{i}",
+                    "course_id": None,
+                    "session_id": None,
+                    "session_start": "2026-08-12T16:00:00",
+                }
+            )
+            for i in range(256)
+        ]
+        return points, "more"
+
+    store._client.scroll = AsyncMock(side_effect=lambda **kwargs: _page(kwargs.get("offset")))
+
+    result = await store.get_sessions_in_window(
+        user_id="primary",
+        start=datetime(2026, 7, 28),
+        end=datetime(2026, 8, 25),
+        safety_cap=300,
+    )
+
+    assert len(result) == 300
+
+
 async def test_get_all_chunks_stops_at_safety_cap() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
@@ -141,13 +270,14 @@ async def test_replace_entity_deletes_existing_then_upserts_new_chunks() -> None
     store._client.upsert = AsyncMock()
 
     metadata = EntityChunkMetadata(
-        content_type="note",
+        content_type="session",
         entity_id=7,
         title="Linear Algebra",
         course_id=3,
         session_id=None,
         user_id="primary",
         fingerprint="hash123",
+        session_start="2026-08-13T18:00:00",
     )
 
     await store.replace_entity(
@@ -160,9 +290,10 @@ async def test_replace_entity_deletes_existing_then_upserts_new_chunks() -> None
     points = kwargs["points"]
     assert len(points) == 2
     assert [p.payload["chunk_index"] for p in points] == [0, 1]
-    assert all(p.payload["content_type"] == "note" for p in points)
+    assert all(p.payload["content_type"] == "session" for p in points)
     assert all(p.payload["entity_id"] == 7 for p in points)
     assert all(p.payload["fingerprint"] == "hash123" for p in points)
+    assert all(p.payload["session_start"] == "2026-08-13T18:00:00" for p in points)
 
 
 async def test_replace_entity_with_no_chunks_only_deletes() -> None:
@@ -179,6 +310,7 @@ async def test_replace_entity_with_no_chunks_only_deletes() -> None:
         session_id=None,
         user_id="primary",
         fingerprint="hash000",
+        session_start=None,
     )
 
     await store.replace_entity(chunks=[], vectors=[], metadata=metadata)
@@ -235,6 +367,7 @@ async def test_search_filters_by_user_id_and_maps_results() -> None:
             "session_id": None,
             "user_id": "primary",
             "fingerprint": "hash123",
+            "session_start": None,
         },
     )
     store._client.query_points = AsyncMock(return_value=SimpleNamespace(points=[fake_point]))
@@ -251,6 +384,7 @@ async def test_search_filters_by_user_id_and_maps_results() -> None:
             course_id=3,
             session_id=None,
             score=0.87,
+            session_start=None,
         )
     ]
     _, kwargs = store._client.query_points.call_args

@@ -15,6 +15,7 @@ def _chunk(entity_id: int, title: str, content: str) -> RetrievedChunk:
         course_id=None,
         session_id=None,
         score=0.9,
+        session_start=None,
     )
 
 
@@ -37,6 +38,20 @@ def test_build_prompt_includes_todays_date_and_temporal_relevance_instruction() 
 
     assert "2026-08-11, Tuesday" in prompt
     assert "NOT relevant" in prompt
+
+
+def test_build_prompt_instructs_exact_offset_not_just_direction_or_proximity() -> None:
+    """Regression test for the "übermorgen" bug (docs/decisions.md "Bug found live: reranker
+    matched 'nearby' dates"): the prompt must tell the model to resolve an EXACT date for any
+    relative expression, in any language - not just distinguish past from future, and not just
+    give English examples."""
+    prompt = _build_prompt(
+        "Welche Session haben wir übermorgen?", [_chunk(1, "A", "...")], today="2026-08-11"
+    )
+
+    assert "EXACT" in prompt
+    assert "übermorgen" in prompt
+    assert "any language" in prompt
 
 
 def test_parse_order_reorders_by_well_formed_response() -> None:

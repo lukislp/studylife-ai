@@ -53,7 +53,15 @@ def fingerprint_course(course: CourseDto) -> str:
 
 
 def fingerprint_session(session: StudySessionDto) -> str:
-    return hashlib.sha256(render_session(session).encode()).hexdigest()
+    # "|schema=2" is a one-time migration bump (see docs/decisions.md "Structured session
+    # dates"): adding the session_start payload field didn't change render_session()'s text, so
+    # without this every already-ingested session would look "unchanged" forever and never get
+    # re-upserted with the new field - the diff in sync_content_type() is purely a fingerprint
+    # comparison, it has no other way to know the payload shape itself changed. Bumping the
+    # fingerprint makes every session look "changed" exactly once, on the next sync tick after
+    # this deploys; safe to remove this suffix (or reuse the trick with a new number) the next
+    # time such a payload-only migration is needed.
+    return hashlib.sha256((render_session(session) + "|schema=2").encode()).hexdigest()
 
 
 def fingerprint_course_goal(goal: CourseGoalDto) -> str:
@@ -74,6 +82,7 @@ async def sync_content_type[T](
     title: Callable[[T], str],
     course_id: Callable[[T], int | None],
     session_id: Callable[[T], int | None],
+    session_start: Callable[[T], str | None],
 ) -> None:
     """Diffs `entities` against `known` and chunks/embeds/upserts/deletes as needed.
 
@@ -128,6 +137,7 @@ async def sync_content_type[T](
                 session_id=session_id(entity),
                 user_id=user_id,
                 fingerprint=fingerprint(entity),
+                session_start=session_start(entity),
             ),
         )
 
@@ -178,6 +188,7 @@ async def sync_user(
         title=lambda n: n.title,
         course_id=lambda n: n.course_id,
         session_id=lambda n: n.session_id,
+        session_start=lambda _n: None,
     )
 
     await sync_content_type(
@@ -193,6 +204,7 @@ async def sync_user(
         title=lambda c: c.name,
         course_id=lambda _c: None,
         session_id=lambda _c: None,
+        session_start=lambda _c: None,
     )
 
     await sync_content_type(
@@ -208,6 +220,7 @@ async def sync_user(
         title=lambda s: f"{s.course_name}, {s.start_time.strftime(DATETIME_FORMAT)}",
         course_id=lambda s: s.course_id,
         session_id=lambda _s: None,
+        session_start=lambda s: s.start_time.isoformat(),
     )
 
     # CourseGoalDto has no own id - course_id is its natural unique key
@@ -226,6 +239,7 @@ async def sync_user(
         title=lambda g: f"{g.course_name} goal",
         course_id=lambda g: g.course_id,
         session_id=lambda _g: None,
+        session_start=lambda _g: None,
     )
 
 
