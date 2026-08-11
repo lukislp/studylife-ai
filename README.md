@@ -13,9 +13,9 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M4.5 (Multi-user) done
+## Status: M5 (Deployment & operations) done
 
-M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is done: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), verified purely locally on this side; per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` populated automatically by StudyLife when a user generates their `AiApiKey` round out the design. The StudyLife-side proxy endpoint (`AiProxyController`) and registration wiring are built and live-verified end-to-end against a real session — see [docs/decisions.md](docs/decisions.md). Still open: the Blazor chat UI itself (a separate step, not started).
+M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is done: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), verified purely locally on this side; per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` populated automatically by StudyLife when a user generates their `AiApiKey` round out the design. The StudyLife-side proxy endpoint (`AiProxyController`) and registration wiring are built and live-verified end-to-end against a real session. M5 is done: cost/latency logging for every LLM call (see [Observability](#observability)), the local Ollama path re-verified live after M4/M4.5's changes, and k3s manifests + a second Flux GitOps source in the StudyLife repo (see [Deployment](#deployment)). Rate limiting was deliberately deferred out of this milestone, not dropped — see [docs/decisions.md](docs/decisions.md). Still open: the Blazor chat UI itself (a separate step, not started).
 
 ## Architecture
 
@@ -192,6 +192,12 @@ llm_call call_site=chat model=gpt-4o-mini latency_ms=1281 prompt_tokens=153 comp
 
 `call_site` (`chat`, `agent`, `rerank`, `retrieval`, `ingestion`, `eval`, `eval-fixture`, `eval-judge`) is pure logging metadata passed to LiteLLM per call - it never reaches the model. `cost_usd` comes straight from LiteLLM's own price-map lookup (`0.0` for local Ollama models, since there's nothing to price). A failed call logs `llm_call_failed` at `WARNING` with the same fields plus the exception, instead of silently disappearing.
 
+## Deployment
+
+k3s manifests live under [`k8s/`](k8s/): a dedicated `studylife-ai` namespace, an in-cluster Qdrant (`03-qdrant.yaml`), the service itself (`04-app.yaml`, non-root, PVC-backed for `REGISTERED_KEYS_DB_PATH`/`AGENT_CHECKPOINT_DB_PATH`), and default-deny `NetworkPolicy`s that only let StudyLife's own backend reach it (`05-network-policies.yaml`) - matching the M4.5 design where only StudyLife's backend ever calls this service, never a browser directly.
+
+Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-deploy/kustomization.yaml) applies only the `ConfigMap`/Qdrant/app subset continuously (image tags auto-bumped via a `GitRepository`/`ImagePolicy`/`ImageUpdateAutomation` chain in the StudyLife repo, same pattern as `studylife-web`/`studylife-worker`) - `Namespace`, `Secret`, and `NetworkPolicy` are bootstrap-only, applied once by hand, because Flux's reconciler intentionally has no RBAC for those resource kinds (see [docs/decisions.md](docs/decisions.md) "M5 - Deployment design"). CI publishes multi-arch (amd64/arm64) images to `ghcr.io/lukislp/studylife-ai`, versioned via `semantic-release` (`.releaserc.json`), gated behind lint/test passing (`.github/workflows/ci.yml`).
+
 ## Roadmap
 
 - [x] **M1** — Repo scaffold: FastAPI service with `/health` and streaming `/chat` (LiteLLM, no RAG), Docker + Compose, CI (lint + tests), README v1.
@@ -199,7 +205,7 @@ llm_call call_site=chat model=gpt-4o-mini latency_ms=1281 prompt_tokens=153 comp
 - [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [x] **M4.5** — Multi-user support: signed proxy-token identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership, a `RegisteredKeyStore` for real per-user `AiApiKey`s, and the StudyLife-side proxy endpoint (`AiProxyController`) + registration wiring — live-verified end-to-end against a real session. See [docs/decisions.md](docs/decisions.md).
-- [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
+- [x] **M5** — k3s deployment, cost/latency logging, Ollama option re-verified. Rate limiting deliberately deferred, not dropped — see [docs/decisions.md](docs/decisions.md).
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
 
