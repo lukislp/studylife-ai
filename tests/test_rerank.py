@@ -128,6 +128,30 @@ async def test_rerank_chunks_reorders_using_model_response(monkeypatch: MonkeyPa
     assert [c.title for c in result] == ["C", "A", "B"]
 
 
+async def test_rerank_chunks_pins_temperature_to_zero(monkeypatch: MonkeyPatch) -> None:
+    """Regression test: the same question about the same real date got different answers on
+    different calls (docs/decisions.md "Reranker temperature pinned") because nothing kept the
+    model's sampling deterministic. A fixed pool + fixed prompt should always rank the same."""
+    captured: dict[str, object] = {}
+
+    async def fake_complete_chat(messages: list[object], **kwargs: object) -> str:
+        captured.update(kwargs)
+        return "0"
+
+    monkeypatch.setattr(rerank_module, "complete_chat", fake_complete_chat)
+
+    await rerank_chunks(
+        "query",
+        [_chunk(1, "A", "..."), _chunk(2, "B", "...")],
+        model="ollama/llama3.2",
+        api_base=None,
+        timeout=30.0,
+        today=date(2026, 8, 11),
+    )
+
+    assert captured["temperature"] == 0.0
+
+
 async def test_rerank_chunks_returns_unchanged_for_single_or_no_chunk(
     monkeypatch: MonkeyPatch,
 ) -> None:

@@ -48,17 +48,22 @@ async def complete_chat(
     api_base: str | None,
     timeout: float,
     call_site: str = "unknown",
+    temperature: float | None = None,
 ) -> str:
     """Non-streaming chat completion - returns the full response text at
     once. Used for reranking (rag/rerank.py), which needs one parseable
     response, not a token stream. `call_site` is pure logging metadata (see
-    `llm/logging.py`) - it never reaches the model."""
+    `llm/logging.py`) - it never reaches the model. `temperature=None`
+    (the default) omits the parameter entirely, leaving the provider's own
+    default in place - LiteLLM strips `None` completion kwargs before
+    sending the request, so this is equivalent to not passing it at all."""
     response = await litellm.acompletion(
         model=model,
         messages=[m.model_dump() for m in messages],
         api_base=api_base,
         timeout=timeout,
         stream=False,
+        temperature=temperature,
         metadata={"call_site": call_site},
     )
     return response.choices[0].message.content or ""

@@ -137,6 +137,14 @@ async def rerank_chunks(
     not a pre-formatted string, so `_build_prompt()` can also use it for
     exact per-passage day-offset arithmetic (see `_relative_day_label()`) -
     not just the "Today's date is ..." sentence.
+
+    Pins `temperature=0.0` on the underlying completion (see docs/decisions.md
+    "Reranker temperature pinned") - found live, even after the deterministic
+    date labels above: the identical question asked twice about the same real
+    date got different answers (once correct, once not), because nothing kept
+    the model's sampling consistent call to call. Reranking a fixed pool by a
+    fixed prompt should be a deterministic operation; leaving temperature at
+    the provider default made it needlessly a coin flip.
     """
     if len(chunks) <= 1:
         return chunks
@@ -149,6 +157,7 @@ async def rerank_chunks(
             api_base=api_base,
             timeout=timeout,
             call_site="rerank",
+            temperature=0.0,
         )
     except Exception:
         logger.exception("Reranking failed, falling back to vector-search order")
