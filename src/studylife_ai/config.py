@@ -60,9 +60,31 @@ class Settings(BaseSettings):
     chunk_size_tokens: int = 500
     chunk_overlap_tokens: int = 75
 
-    # Retrieval v1 (see docs/decisions.md "Retrieval design"): fixed top-k,
-    # pure vector search, no reranking, user_id-only filter.
+    # Retrieval (see docs/decisions.md "Retrieval design" and "Retrieval
+    # quality: reranking + per-content-type quota"): final number of chunks
+    # handed to the LLM. retrieve_with_rerank() (rag/retrieval.py) always
+    # fetches an even per-content-type candidate quota first (see
+    # rerank_candidate_k) - a popular course's many session chunks can no
+    # longer crowd out a note just by outnumbering it, independent of
+    # whether rerank_model is set.
     retrieval_top_k: int = 5
+
+    # Target candidate pool retrieve_with_rerank() fetches before narrowing
+    # down to retrieval_top_k, split evenly across the 4 content types (see
+    # retrieval_top_k above) - always applied, not just when reranking. A
+    # target, not an exact count: each type fetches at least 1 candidate, so
+    # values below 4 fetch more than configured (4 total); values not evenly
+    # divisible by 4 are floored per type, so the actual pool can be
+    # slightly under the configured number.
+    rerank_candidate_k: int = 20
+
+    # Optional LLM-based reranking of that candidate pool (see
+    # docs/decisions.md "Retrieval quality: reranking + per-content-type
+    # quota"): unset by default - without it, the candidate pool is just
+    # sorted by vector-similarity score. Deliberately independent of
+    # llm_model (a small/fast model suffices for scoring, doesn't need to
+    # match the answer model).
+    rerank_model: str | None = None
 
     # RAGAS eval judge (M3, see docs/decisions.md "Eval design"): a LiteLLM
     # model string, deliberately independent of llm_model. No default -

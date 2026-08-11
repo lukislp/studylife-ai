@@ -36,3 +36,23 @@ async def stream_chat_completion(
         delta = chunk.choices[0].delta.content
         if delta:
             yield delta
+
+
+async def complete_chat(
+    messages: list[ChatMessage],
+    *,
+    model: str,
+    api_base: str | None,
+    timeout: float,
+) -> str:
+    """Non-streaming chat completion - returns the full response text at
+    once. Used for reranking (rag/rerank.py), which needs one parseable
+    response, not a token stream."""
+    response = await litellm.acompletion(
+        model=model,
+        messages=[m.model_dump() for m in messages],
+        api_base=api_base,
+        timeout=timeout,
+        stream=False,
+    )
+    return response.choices[0].message.content or ""
