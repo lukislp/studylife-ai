@@ -1,3 +1,10 @@
+## [1.1.3](https://github.com/lukislp/studylife-ai/compare/v1.1.2...v1.1.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** fetch every session instead of a vector-similarity top-k ([1d67572](https://github.com/lukislp/studylife-ai/commit/1d67572a327ce47def24c85cd6e38ded32ba1e93))
+
 ## [1.1.2](https://github.com/lukislp/studylife-ai/compare/v1.1.1...v1.1.2) (2026-08-11)
 
 
