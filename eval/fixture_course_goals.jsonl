@@ -1,0 +1,3 @@
+{"course_id": 9, "course_name": "Studium Generale I", "completed_at": "2026-07-12T10:00:00", "grade": 1.0, "completed_topics": "Wissenschaftliches Arbeiten"}
+{"course_id": 10, "course_name": "Studium Generale II", "completed_at": "2026-07-12T10:00:00", "grade": 1.0, "completed_topics": "Projektmanagement"}
+{"course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "completed_at": "2026-07-12T10:00:00", "grade": 1.3, "completed_topics": "Syntax, List Comprehensions, Funktionen"}

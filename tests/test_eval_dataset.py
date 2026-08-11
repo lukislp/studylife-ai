@@ -7,9 +7,9 @@ def test_load_eval_cases_parses_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "dataset.jsonl"
     path.write_text(
         '{"id": "a", "question": "Was sind Eigenwerte?", '
-        '"expected_note_titles": ["Merkzettel Eigenwerte"], "category": "basic"}\n'
+        '"expected_titles": ["Merkzettel Eigenwerte"], "category": "basic"}\n'
         "\n"
-        '{"id": "b", "question": "Kein Treffer?", "expected_note_titles": [], '
+        '{"id": "b", "question": "Kein Treffer?", "expected_titles": [], '
         '"category": "no-match"}\n',
         encoding="utf-8",
     )
@@ -20,8 +20,8 @@ def test_load_eval_cases_parses_jsonl(tmp_path: Path) -> None:
         EvalCase(
             id="a",
             question="Was sind Eigenwerte?",
-            expected_note_titles=["Merkzettel Eigenwerte"],
+            expected_titles=["Merkzettel Eigenwerte"],
             category="basic",
         ),
-        EvalCase(id="b", question="Kein Treffer?", expected_note_titles=[], category="no-match"),
+        EvalCase(id="b", question="Kein Treffer?", expected_titles=[], category="no-match"),
     ]

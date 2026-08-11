@@ -172,7 +172,7 @@ async def run_eval(cases: list[EvalCase], *, settings: Settings, store: QdrantSt
         note_matches.append(
             NoteMatchResult(
                 case_id=case.id,
-                expected_titles=set(case.expected_note_titles),
+                expected_titles=set(case.expected_titles),
                 retrieved_titles={chunk.title for chunk in chunks},
             )
         )
@@ -182,7 +182,7 @@ async def run_eval(cases: list[EvalCase], *, settings: Settings, store: QdrantSt
         dataset=dataset,
         # LLMContextPrecisionWithoutReference, not ContextPrecision (=
         # LLMContextPrecisionWithReference): our eval cases have no
-        # ground-truth reference answer, only expected_note_titles for the
+        # ground-truth reference answer, only expected_titles for the
         # separate, non-LLM note-match check below. The "without reference"
         # variant judges context precision from the generated response
         # itself, which fits the fields our SingleTurnSamples carry.

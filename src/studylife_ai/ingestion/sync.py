@@ -60,7 +60,7 @@ def fingerprint_course_goal(goal: CourseGoalDto) -> str:
     return hashlib.sha256(render_course_goal(goal).encode()).hexdigest()
 
 
-async def _sync_content_type[T](
+async def sync_content_type[T](
     *,
     store: QdrantStore,
     settings: Settings,
@@ -75,6 +75,12 @@ async def _sync_content_type[T](
     course_id: Callable[[T], int | None],
     session_id: Callable[[T], int | None],
 ) -> None:
+    """Diffs `entities` against `known` and chunks/embeds/upserts/deletes as needed.
+
+    Public (not `_`-prefixed): reused by `eval/fixture.py`'s course/session/course_goal seeding
+    (with `known={}`, so every fixture entity is treated as new) - the exact same chunk+embed+
+    upsert mechanics real ingestion uses, not a separate parallel implementation.
+    """
     current_ids = {entity_id(e) for e in entities}
     if len(current_ids) != len(entities):
         # Two entities mapped to the same entity_id (e.g. more than one
@@ -159,7 +165,7 @@ async def sync_user(
             studylife.get_course_goals(),
         )
 
-    await _sync_content_type(
+    await sync_content_type(
         store=store,
         settings=settings,
         user_id=user_id,
@@ -174,7 +180,7 @@ async def sync_user(
         session_id=lambda n: n.session_id,
     )
 
-    await _sync_content_type(
+    await sync_content_type(
         store=store,
         settings=settings,
         user_id=user_id,
@@ -189,7 +195,7 @@ async def sync_user(
         session_id=lambda _c: None,
     )
 
-    await _sync_content_type(
+    await sync_content_type(
         store=store,
         settings=settings,
         user_id=user_id,
@@ -207,7 +213,7 @@ async def sync_user(
     # CourseGoalDto has no own id - course_id is its natural unique key
     # (the API only ever returns one goal per course). If that ever
     # changes, this silently keeps only the last-diffed goal per course.
-    await _sync_content_type(
+    await sync_content_type(
         store=store,
         settings=settings,
         user_id=user_id,

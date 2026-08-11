@@ -1,0 +1,8 @@
+{"id": 1, "name": "Algorithmen und Datenstrukturen", "code": "INF201", "semester": 3, "ects": 6, "topics": ["Suchalgorithmen", "Graphen", "Sortieren"]}
+{"id": 2, "name": "Einführung in die Programmierung mit Python", "code": "INF101", "semester": 1, "ects": 5, "topics": ["Syntax", "List Comprehensions", "Funktionen"]}
+{"id": 3, "name": "Analysis", "code": "MATH201", "semester": 2, "ects": 8, "topics": ["Ableitungen", "Integrale", "Grenzwerte"]}
+{"id": 6, "name": "Lineare Algebra", "code": "MATH101", "semester": 1, "ects": 8, "topics": ["Matrizen", "Eigenwerte", "Vektorräume"]}
+{"id": 7, "name": "Statistik", "code": "MATH301", "semester": 4, "ects": 6, "topics": ["Verteilungen", "Erwartungswert"]}
+{"id": 8, "name": "Statistik Tutorium", "code": "MATH301T", "semester": 4, "ects": 2, "topics": ["Übungen"]}
+{"id": 9, "name": "Studium Generale I", "code": "SG101", "semester": 1, "ects": 3, "topics": ["Wissenschaftliches Arbeiten"]}
+{"id": 10, "name": "Studium Generale II", "code": "SG102", "semester": 2, "ects": 3, "topics": ["Projektmanagement"]}

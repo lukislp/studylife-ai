@@ -1,12 +1,17 @@
-{"id": "eigenwerte-basic", "question": "Wie bestimme ich Eigenwerte einer Matrix?", "expected_note_titles": ["Merkzettel Eigenwerte"], "category": "basic"}
-{"id": "matrix-multiplikation", "question": "Wie multipliziert man zwei Matrizen?", "expected_note_titles": ["Matrizenmultiplikation"], "category": "precision-same-course"}
-{"id": "lgs-loesen", "question": "Wie löse ich ein lineares Gleichungssystem?", "expected_note_titles": ["Lineare Gleichungssysteme lösen"], "category": "precision-same-course"}
-{"id": "erwartungswert-varianz", "question": "Wie berechne ich Erwartungswert und Varianz?", "expected_note_titles": ["Erwartungswert und Varianz"], "category": "basic"}
-{"id": "hypothesentest-ablauf", "question": "Wie läuft ein Hypothesentest ab?", "expected_note_titles": ["Hypothesentests Ablauf"], "category": "precision-cross-course"}
-{"id": "ableitungsregeln", "question": "Wie leite ich eine verkettete Funktion ab?", "expected_note_titles": ["Ableitungsregeln"], "category": "precision-cross-course"}
-{"id": "suchalgorithmen", "question": "Was ist der Unterschied zwischen BFS und A*?", "expected_note_titles": ["Suchalgorithmen Übersicht"], "category": "basic"}
-{"id": "list-comprehension", "question": "Wie schreibe ich eine List Comprehension in Python?", "expected_note_titles": ["List Comprehensions"], "category": "basic"}
-{"id": "statistik-breit", "question": "Was habe ich zur Statistik notiert?", "expected_note_titles": ["Erwartungswert und Varianz", "Hypothesentests Ablauf"], "category": "multi-hit"}
-{"id": "cloud-kein-treffer", "question": "Was ist der Unterschied zwischen IaaS und PaaS?", "expected_note_titles": [], "category": "no-match"}
-{"id": "tutor-frage", "question": "Was wollte ich meinen Tutor fragen?", "expected_note_titles": ["Fragen an Tutor"], "category": "basic"}
-{"id": "bfs-dfs-english", "question": "What's the difference between BFS and DFS?", "expected_note_titles": ["Suchalgorithmen Übersicht"], "category": "cross-lingual"}
+{"id": "eigenwerte-basic", "question": "Wie bestimme ich Eigenwerte einer Matrix?", "expected_titles": ["Merkzettel Eigenwerte"], "category": "basic"}
+{"id": "matrix-multiplikation", "question": "Wie multipliziert man zwei Matrizen?", "expected_titles": ["Matrizenmultiplikation"], "category": "precision-same-course"}
+{"id": "lgs-loesen", "question": "Wie löse ich ein lineares Gleichungssystem?", "expected_titles": ["Lineare Gleichungssysteme lösen"], "category": "precision-same-course"}
+{"id": "erwartungswert-varianz", "question": "Wie berechne ich Erwartungswert und Varianz?", "expected_titles": ["Erwartungswert und Varianz"], "category": "basic"}
+{"id": "hypothesentest-ablauf", "question": "Wie läuft ein Hypothesentest ab?", "expected_titles": ["Hypothesentests Ablauf"], "category": "precision-cross-course"}
+{"id": "ableitungsregeln", "question": "Wie leite ich eine verkettete Funktion ab?", "expected_titles": ["Ableitungsregeln"], "category": "precision-cross-course"}
+{"id": "suchalgorithmen", "question": "Was ist der Unterschied zwischen BFS und A*?", "expected_titles": ["Suchalgorithmen Übersicht"], "category": "basic"}
+{"id": "list-comprehension", "question": "Wie schreibe ich eine List Comprehension in Python?", "expected_titles": ["List Comprehensions"], "category": "basic"}
+{"id": "statistik-breit", "question": "Was habe ich zur Statistik notiert?", "expected_titles": ["Erwartungswert und Varianz", "Hypothesentests Ablauf"], "category": "multi-hit"}
+{"id": "cloud-kein-treffer", "question": "Was ist der Unterschied zwischen IaaS und PaaS?", "expected_titles": [], "category": "no-match"}
+{"id": "tutor-frage", "question": "Was wollte ich meinen Tutor fragen?", "expected_titles": ["Fragen an Tutor"], "category": "basic"}
+{"id": "bfs-dfs-english", "question": "What's the difference between BFS and DFS?", "expected_titles": ["Suchalgorithmen Übersicht"], "category": "cross-lingual"}
+{"id": "session-fixed-date", "question": "Welche Kurse standen am 11.08.2026 an?", "expected_titles": ["Algorithmen und Datenstrukturen, 2026-08-11 16:00"], "category": "session-date-relevance"}
+{"id": "session-topic-fixed-date", "question": "Was ist das Thema meiner Session am 11.08.2026 um 16 Uhr?", "expected_titles": ["Algorithmen und Datenstrukturen, 2026-08-11 16:00"], "category": "session-date-relevance"}
+{"id": "completed-courses", "question": "Welche Kurse habe ich bereits abgeschlossen?", "expected_titles": ["Studium Generale I goal", "Studium Generale II goal", "Einführung in die Programmierung mit Python goal"], "category": "course-completion"}
+{"id": "course-grade", "question": "Welche Note habe ich in Studium Generale I bekommen?", "expected_titles": ["Studium Generale I goal"], "category": "course-completion"}
+{"id": "course-ects", "question": "Wie viele ECTS hat der Kurs Lineare Algebra?", "expected_titles": ["Lineare Algebra"], "category": "course-info"}

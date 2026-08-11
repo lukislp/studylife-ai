@@ -128,13 +128,13 @@ async def test_run_eval_scores_generated_answers_and_reports_note_matches(
         EvalCase(
             id="a",
             question="Was sind Eigenwerte?",
-            expected_note_titles=["Eigenwerte"],
+            expected_titles=["Eigenwerte"],
             category="basic",
         ),
         EvalCase(
             id="b",
             question="Was ist Cloud Computing?",
-            expected_note_titles=["Cloud"],
+            expected_titles=["Cloud"],
             category="no-match",
         ),
     ]

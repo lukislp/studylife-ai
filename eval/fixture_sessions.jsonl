@@ -1,0 +1,6 @@
+{"id": 101, "course_id": 1, "course_name": "Algorithmen und Datenstrukturen", "start_time": "2026-08-11T16:00:00", "end_time": "2026-08-11T17:30:00", "topic": "Suchalgorithmen: BFS und DFS", "is_completed": false}
+{"id": 102, "course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "start_time": "2026-05-20T14:00:00", "end_time": "2026-05-20T15:30:00", "topic": "List Comprehensions", "is_completed": true}
+{"id": 103, "course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "start_time": "2026-05-21T14:00:00", "end_time": "2026-05-21T15:30:00", "topic": "List Comprehensions", "is_completed": true}
+{"id": 104, "course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "start_time": "2026-05-22T14:00:00", "end_time": "2026-05-22T15:30:00", "topic": "List Comprehensions", "is_completed": true}
+{"id": 105, "course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "start_time": "2026-05-23T14:00:00", "end_time": "2026-05-23T15:30:00", "topic": "List Comprehensions", "is_completed": true}
+{"id": 106, "course_id": 2, "course_name": "Einführung in die Programmierung mit Python", "start_time": "2026-05-24T14:00:00", "end_time": "2026-05-24T15:30:00", "topic": "List Comprehensions", "is_completed": true}

@@ -8,11 +8,14 @@ DEFAULT_DATASET_PATH = Path("eval/dataset.jsonl")
 
 
 class EvalCase(BaseModel):
-    """One eval question, with the notes it should retrieve (empty = none expected)."""
+    """One eval question, with the entity titles retrieval should surface (empty = none
+    expected). Named `expected_titles`, not `expected_note_titles` - cases can expect
+    course/session/course_goal titles too, not just notes (see docs/decisions.md "Eval coverage
+    for course/session questions")."""
 
     id: str
     question: str
-    expected_note_titles: list[str]
+    expected_titles: list[str]
     category: str
 
 
