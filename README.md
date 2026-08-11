@@ -6,7 +6,7 @@
 
 A standalone Python microservice that adds an LLM agent to [StudyLife](https://github.com/lukislp/studylife) (Blazor WASM + ASP.NET Core, .NET 10), a self-hosted study platform. It will provide:
 
-- **Study Assistant (RAG)** — answer questions about notes, courses, and calendar data, with citations back to the source note.
+- **Study Assistant (RAG)** — answer questions about notes, courses, and calendar data, with citations back to the source.
 - **Study Plan Generator** — turn exam dates, ECTS targets, and availability into a weekly plan.
 - **Agent Actions (function calling)** — create sessions, start timers, summarize notes via the existing StudyLife REST API. Write actions always go through a confirmation flow.
 - **Evaluation** — a RAGAS-based eval pipeline (faithfulness, answer relevancy, context precision) running in CI.
@@ -98,9 +98,10 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. Required for ingestion. |
 | `STUDYLIFE_API_KEY`            | _(unset)_                 | StudyLife's non-interactive API key, dedicated to studylife-ai (Settings → "studylife-ai connection" card, after a passkey login). Required for ingestion. |
 | `STUDYLIFE_USER_ID`            | `primary`                 | Arbitrary label stored on ingested chunks, not a StudyLife-internal ID — see [docs/decisions.md](docs/decisions.md). |
+| `STUDYLIFE_SESSION_HISTORY_DAYS` | `1825`                  | Lookback window (in days, from "now") for ingesting study sessions. Rolling, not a fixed boundary — a session older than this is dropped from the index on the next sync — see [docs/decisions.md](docs/decisions.md). |
 | `EMBEDDING_MODEL`              | `ollama/nomic-embed-text` | LiteLLM embedding model identifier, same provider convention as `LLM_MODEL`. |
 | `QDRANT_URL`                   | `http://localhost:6333`  | Qdrant connection URL.                                                      |
-| `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for note chunks.                                     |
+| `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for all ingested chunks (notes, courses, sessions, course goals). |
 | `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
 | `RETRIEVAL_TOP_K`              | `5`                       | Number of chunks retrieved per query (fixed top-k, v1 — see [docs/decisions.md](docs/decisions.md)). |
@@ -109,11 +110,11 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 ## API
 
 - `GET /health` — liveness check.
-- `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant note chunks (see [Retrieval design](docs/decisions.md)), injected as a system message ahead of the conversation. Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"note_id": ..., "title": "...", "course_id": ...}, ...]}` listing the notes actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
+- `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks across notes, courses, sessions, and course goals (see [Retrieval design](docs/decisions.md)), injected as a system message ahead of the conversation. Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
 
 ## Ingestion
 
-Syncs StudyLife notes into Qdrant: fetches all notes, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. Requires `STUDYLIFE_API_BASE_URL` and `STUDYLIFE_API_KEY` to be set.
+Syncs StudyLife notes, courses, study sessions (calendar), and course goals into one Qdrant collection: fetches all entities of each type, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. A `content_type` field on every point disambiguates types that can share numeric ids (e.g. course id=5 and note id=5). Requires `STUDYLIFE_API_BASE_URL` and `STUDYLIFE_API_KEY` to be set.
 
 ```bash
 # via docker compose (uses the running app container's environment)
@@ -148,7 +149,7 @@ These are the first real numbers; no CI thresholds are set yet (see [docs/decisi
 - [ ] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
-- [ ] **Backlog** — ingest courses and calendar/session data too (currently notes only), so the RAG assistant reaches the full "notes, courses, calendar" coverage described above. Chunking/retrieval/prompt pipeline is generic over content type, so this should extend the existing M2 pieces rather than redesign them.
+- [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
 
 ## Tech stack
 
