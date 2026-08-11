@@ -1,78 +1,104 @@
-from unittest.mock import AsyncMock
+import time
 
-import httpx
 import pytest
 from fastapi import HTTPException
+from pytest import MonkeyPatch
 from starlette.datastructures import Headers
 from starlette.requests import Request
 
-from studylife_ai.api.identity import resolve_identity, verify_identity
+from studylife_ai.api import identity as identity_module
+from studylife_ai.api.identity import PROXY_TOKEN_HEADER, _sign, resolve_identity
+from studylife_ai.config import Settings
+
+_SECRET = "test-shared-secret"
 
 
 def _request(headers: dict[str, str]) -> Request:
-    scope = {
-        "type": "http",
-        "headers": Headers(headers).raw,
-    }
+    scope = {"type": "http", "headers": Headers(headers).raw}
     return Request(scope)
 
 
-def test_resolve_identity_returns_headers_when_both_present() -> None:
-    identity = resolve_identity(
-        _request({"X-StudyLife-User-Id": "1", "X-StudyLife-Ai-Key": "secret"})
+def _token(user_id: str, expiry: int, secret: str = _SECRET) -> str:
+    payload = f"{user_id}.{expiry}"
+    return f"{payload}.{_sign(payload, secret)}"
+
+
+def _patch_secret(monkeypatch: MonkeyPatch, secret: str | None) -> None:
+    monkeypatch.setattr(
+        identity_module,
+        "get_settings",
+        lambda: Settings(studylife_shared_secret=secret),  # type: ignore[arg-type]
     )
 
-    assert identity.user_id == "1"
-    assert identity.ai_api_key == "secret"
+
+def test_resolve_identity_returns_user_id_for_a_valid_token(monkeypatch: MonkeyPatch) -> None:
+    _patch_secret(monkeypatch, _SECRET)
+    token = _token("42", int(time.time()) + 60)
+
+    identity = resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
+
+    assert identity.user_id == "42"
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        {},
-        {"X-StudyLife-User-Id": "1"},
-        {"X-StudyLife-Ai-Key": "secret"},
-    ],
-)
-def test_resolve_identity_raises_401_when_a_header_is_missing(headers: dict[str, str]) -> None:
+def test_resolve_identity_raises_401_when_header_is_missing(monkeypatch: MonkeyPatch) -> None:
+    _patch_secret(monkeypatch, _SECRET)
+
     with pytest.raises(HTTPException) as exc_info:
-        resolve_identity(_request(headers))
+        resolve_identity(_request({}))
 
     assert exc_info.value.status_code == 401
 
 
-async def test_verify_identity_passes_when_the_call_succeeds() -> None:
-    fake_client = AsyncMock()
-    fake_client.get_courses.return_value = []
-
-    await verify_identity(fake_client)
-
-    fake_client.get_courses.assert_awaited_once()
-
-
-async def test_verify_identity_raises_401_on_a_401_response() -> None:
-    fake_client = AsyncMock()
-    response = httpx.Response(
-        401, request=httpx.Request("GET", "http://studylife.test/api/courses")
-    )
-    fake_client.get_courses.side_effect = httpx.HTTPStatusError(
-        "unauthorized", request=response.request, response=response
-    )
+@pytest.mark.parametrize("token", ["not-three-parts", "a.b.c.d", ""])
+def test_resolve_identity_raises_401_for_malformed_token(
+    monkeypatch: MonkeyPatch, token: str
+) -> None:
+    _patch_secret(monkeypatch, _SECRET)
 
     with pytest.raises(HTTPException) as exc_info:
-        await verify_identity(fake_client)
+        resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
 
     assert exc_info.value.status_code == 401
 
 
-async def test_verify_identity_reraises_non_401_http_errors() -> None:
-    fake_client = AsyncMock()
-    response = httpx.Response(
-        500, request=httpx.Request("GET", "http://studylife.test/api/courses")
-    )
-    fake_client.get_courses.side_effect = httpx.HTTPStatusError(
-        "server error", request=response.request, response=response
-    )
+def test_resolve_identity_raises_401_for_a_bad_signature(monkeypatch: MonkeyPatch) -> None:
+    _patch_secret(monkeypatch, _SECRET)
+    token = _token("42", int(time.time()) + 60, secret="wrong-secret")
 
-    with pytest.raises(httpx.HTTPStatusError):
-        await verify_identity(fake_client)
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
+
+    assert exc_info.value.status_code == 401
+
+
+def test_resolve_identity_raises_401_for_an_expired_token(monkeypatch: MonkeyPatch) -> None:
+    _patch_secret(monkeypatch, _SECRET)
+    token = _token("42", int(time.time()) - 1)
+
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
+
+    assert exc_info.value.status_code == 401
+
+
+def test_resolve_identity_raises_401_for_a_non_integer_expiry(monkeypatch: MonkeyPatch) -> None:
+    _patch_secret(monkeypatch, _SECRET)
+    payload = "42.not-a-number"
+    token = f"{payload}.{_sign(payload, _SECRET)}"
+
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
+
+    assert exc_info.value.status_code == 401
+
+
+def test_resolve_identity_raises_503_when_secret_is_not_configured(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _patch_secret(monkeypatch, None)
+    token = _token("42", int(time.time()) + 60)
+
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_identity(_request({PROXY_TOKEN_HEADER: token}))
+
+    assert exc_info.value.status_code == 503

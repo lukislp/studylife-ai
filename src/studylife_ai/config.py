@@ -3,18 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class IngestionUser(BaseModel):
-    """One StudyLife account the ingestion worker syncs (see docs/decisions.md
-    "M4.5 Multi-user support" - a static, manually-maintained list rather than
-    a privileged "list all users" StudyLife endpoint). `user_id` is the real
-    StudyLife-internal AuthUserId, used as the Qdrant partition key."""
-
-    user_id: str
-    ai_api_key: str
 
 
 class Settings(BaseSettings):
@@ -41,15 +30,16 @@ class Settings(BaseSettings):
 
     # StudyLife REST API. One shared instance URL for all users (see
     # docs/decisions.md "M4.5 Multi-user support") — no default, ingestion
-    # and /chat/agent fail loudly if unset rather than silently pointing
-    # nowhere.
+    # and /agent fail loudly if unset rather than silently pointing nowhere.
     studylife_api_base_url: str | None = None
-    # Accounts the ingestion worker syncs, one entry per StudyLife user (see
-    # IngestionUser above). JSON list in the env var, e.g.
-    # INGESTION_USERS=[{"user_id": "1", "ai_api_key": "..."}]. /chat and
-    # /agent get their identity from per-request headers instead (see
-    # api/identity.py), not from this list.
-    ingestion_users: list[IngestionUser] = []
+    # Shared secret StudyLife signs per-request proxy tokens with (see
+    # api/identity.py, docs/decisions.md "M4.5 Multi-user support" - "Auth
+    # flow, take two"). Must match the same value configured on the
+    # StudyLife side exactly - a mismatch makes every /chat and /agent
+    # request fail with 401. Also authenticates POST /internal/register-key
+    # and /internal/revoke-key (a simpler constant-time bearer-secret check,
+    # not the signed-token scheme - those aren't per-user requests).
+    studylife_shared_secret: str | None = None
     # Lookback window for GET /api/sessions/history (see docs/decisions.md
     # "Ingestion scope expansion"). ~5 years, measured from "now" every sync
     # run - it IS a rolling window: a session older than this eventually
@@ -118,6 +108,14 @@ class Settings(BaseSettings):
     # lose a pending action on restart, which a write-confirmation flow
     # specifically must not do.
     agent_checkpoint_db_path: str = "agent_checkpoints.db"
+
+    # M4.5 (see docs/decisions.md "M4.5 Multi-user support"): SQLite file
+    # backing the per-user AiApiKey registry - populated by StudyLife's
+    # POST /internal/register-key/revoke-key calls, read by /agent (to build
+    # a real StudyLifeClient for the calling user) and by ingestion's
+    # sync_all() (which syncs every registered user, replacing the earlier
+    # manually-maintained INGESTION_USERS list).
+    registered_keys_db_path: str = "registered_keys.db"
 
 
 @lru_cache
