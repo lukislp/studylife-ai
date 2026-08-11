@@ -4,17 +4,15 @@ from unittest.mock import AsyncMock
 import pytest
 from pytest import MonkeyPatch
 
-from studylife_ai.config import IngestionUser, Settings
+from studylife_ai.config import Settings
 from studylife_ai.ingestion import sync as sync_module
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
-
-_TEST_USER = IngestionUser(user_id="primary", ai_api_key="secret")
+from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "studylife_api_base_url": "http://studylife.test",
-        "ingestion_users": [_TEST_USER],
         "embedding_model": "ollama/nomic-embed-text",
         "chunk_size_tokens": 500,
         "chunk_overlap_tokens": 75,
@@ -24,6 +22,19 @@ def _settings(**overrides: object) -> Settings:
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
+
+
+async def _install_registered_users(monkeypatch: MonkeyPatch, users: dict[str, str]) -> None:
+    """sync_all() builds its own RegisteredKeyStore internally (from
+    settings.registered_keys_db_path) - swap in an in-memory one pre-loaded
+    with the given {user_id: ai_api_key} pairs instead of touching a real
+    file. sync_all() calls .setup() on it too, which is a harmless no-op
+    against an already-set-up store (CREATE TABLE IF NOT EXISTS)."""
+    store = RegisteredKeyStore(":memory:")
+    await store.setup()
+    for user_id, ai_api_key in users.items():
+        await store.set(user_id, ai_api_key)
+    monkeypatch.setattr(sync_module, "RegisteredKeyStore", lambda db_path: store)
 
 
 def _note(note_id: int, title: str, content: str) -> StudyLifeNote:
@@ -110,11 +121,11 @@ async def test_sync_raises_without_studylife_base_url() -> None:
         await sync_module.sync_all(settings)
 
 
-async def test_sync_raises_without_any_configured_ingestion_users() -> None:
-    settings = _settings(ingestion_users=[])
+async def test_sync_raises_without_any_registered_users(monkeypatch: MonkeyPatch) -> None:
+    await _install_registered_users(monkeypatch, {})
 
-    with pytest.raises(RuntimeError, match="INGESTION_USERS"):
-        await sync_module.sync_all(settings)
+    with pytest.raises(RuntimeError, match="No users registered"):
+        await sync_module.sync_all(_settings())
 
 
 async def _run_sync_all(
@@ -126,6 +137,7 @@ async def _run_sync_all(
     monkeypatch.setattr(sync_module, "StudyLifeClient", lambda **kwargs: fake_client)
     monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
     monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    await _install_registered_users(monkeypatch, {"primary": "secret"})
 
     await sync_module.sync_all(_settings())
 
@@ -277,14 +289,12 @@ async def test_sync_all_closes_store_once_even_with_empty_entity_lists(
     fake_store.delete_entity.assert_not_awaited()
 
 
-async def test_sync_all_syncs_every_configured_user_with_their_own_key(
+async def test_sync_all_syncs_every_registered_user_with_their_own_key(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Multi-user (see docs/decisions.md "M4.5 Multi-user support"):
-    sync_all() must build a separate StudyLifeClient per configured user,
+    sync_all() must build a separate StudyLifeClient per registered user,
     using that user's own ai_api_key - never one shared credential."""
-    user_a = IngestionUser(user_id="alice", ai_api_key="key-a")
-    user_b = IngestionUser(user_id="bob", ai_api_key="key-b")
     constructed_keys: list[object] = []
 
     def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
@@ -299,10 +309,11 @@ async def test_sync_all_syncs_every_configured_user_with_their_own_key(
     monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
     monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
     monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    await _install_registered_users(monkeypatch, {"alice": "key-a", "bob": "key-b"})
 
-    await sync_module.sync_all(_settings(ingestion_users=[user_a, user_b]))
+    await sync_module.sync_all(_settings())
 
-    assert constructed_keys == ["key-a", "key-b"]
+    assert sorted(constructed_keys) == ["key-a", "key-b"]
     fake_store.close.assert_awaited_once()
 
 
@@ -310,9 +321,7 @@ async def test_sync_all_continues_with_other_users_after_one_fails(
     monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A revoked key or StudyLife-side error for one user must not starve
-    ingestion for every other configured user."""
-    user_a = IngestionUser(user_id="alice", ai_api_key="key-a")
-    user_b = IngestionUser(user_id="bob", ai_api_key="key-b")
+    ingestion for every other registered user."""
     synced_users: list[str] = []
 
     def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
@@ -329,9 +338,10 @@ async def test_sync_all_continues_with_other_users_after_one_fails(
     monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
     monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
     monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    await _install_registered_users(monkeypatch, {"alice": "key-a", "bob": "key-b"})
 
     with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
-        await sync_module.sync_all(_settings(ingestion_users=[user_a, user_b]))
+        await sync_module.sync_all(_settings())
 
     assert synced_users == ["key-b"]
     assert any("failed for user_id=alice" in record.message for record in caplog.records)

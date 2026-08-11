@@ -7,9 +7,10 @@ changed, delete what's gone. Runs across all four content types (notes,
 courses, sessions, course goals — see docs/decisions.md "Ingestion scope
 expansion") through one shared helper, since the diff/chunk/embed/upsert/
 delete control flow is identical for all of them. `sync_all()` then repeats
-this per StudyLife account configured in `settings.ingestion_users` (see
-docs/decisions.md "M4.5 Multi-user support"), each into its own Qdrant
-partition.
+this per StudyLife account registered in `RegisteredKeyStore` (see
+docs/decisions.md "M4.5 Multi-user support" - populated by StudyLife's
+registration callback, not a manually-maintained list), each into its own
+Qdrant partition.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ import hashlib
 import logging
 from collections.abc import Callable, Sequence
 
-from studylife_ai.config import IngestionUser, Settings
+from studylife_ai.config import Settings
 from studylife_ai.ingestion.chunking import chunk_text
 from studylife_ai.ingestion.qdrant_store import ContentType, EntityChunkMetadata, QdrantStore
 from studylife_ai.ingestion.rendering import (
@@ -29,6 +30,7 @@ from studylife_ai.ingestion.rendering import (
 from studylife_ai.llm.embeddings import embed_texts
 from studylife_ai.studylife.client import StudyLifeClient
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
+from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +125,14 @@ async def _sync_content_type[T](
         await store.delete_entity(user_id=user_id, content_type=content_type, entity_id=eid)
 
 
-async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantStore) -> None:
-    known = await store.get_known_fingerprints(user_id=user.user_id)
+async def _sync_user(
+    *, user_id: str, ai_api_key: str, settings: Settings, store: QdrantStore
+) -> None:
+    known = await store.get_known_fingerprints(user_id=user_id)
 
     async with StudyLifeClient(
         base_url=settings.studylife_api_base_url,  # type: ignore[arg-type]
-        api_key=user.ai_api_key,
+        api_key=ai_api_key,
     ) as studylife:
         # Four independent endpoints - fetch concurrently rather than
         # paying each round-trip in series.
@@ -144,7 +148,7 @@ async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantSt
     await _sync_content_type(
         store=store,
         settings=settings,
-        user_id=user.user_id,
+        user_id=user_id,
         known=known,
         entities=notes,
         content_type="note",
@@ -159,7 +163,7 @@ async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantSt
     await _sync_content_type(
         store=store,
         settings=settings,
-        user_id=user.user_id,
+        user_id=user_id,
         known=known,
         entities=courses,
         content_type="course",
@@ -174,7 +178,7 @@ async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantSt
     await _sync_content_type(
         store=store,
         settings=settings,
-        user_id=user.user_id,
+        user_id=user_id,
         known=known,
         entities=sessions,
         content_type="session",
@@ -192,7 +196,7 @@ async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantSt
     await _sync_content_type(
         store=store,
         settings=settings,
-        user_id=user.user_id,
+        user_id=user_id,
         known=known,
         entities=course_goals,
         content_type="course_goal",
@@ -206,7 +210,7 @@ async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantSt
 
 
 async def sync_all(settings: Settings) -> None:
-    """Syncs every configured StudyLife account (see docs/decisions.md
+    """Syncs every registered StudyLife account (see docs/decisions.md
     "M4.5 Multi-user support") into its own Qdrant partition, one after
     another - not concurrently, since each user's own four-endpoint fetch is
     already the parallel unit of work, and running multiple users at once
@@ -215,20 +219,34 @@ async def sync_all(settings: Settings) -> None:
     One user's failure (e.g. a revoked ai_api_key, a StudyLife-side error) is
     logged and skipped rather than aborting the whole run - otherwise a
     single broken account would silently starve ingestion for every other
-    configured user until fixed.
+    registered user until fixed.
     """
     if not settings.studylife_api_base_url:
         raise RuntimeError("STUDYLIFE_API_BASE_URL must be set to run ingestion.")
-    if not settings.ingestion_users:
-        raise RuntimeError("INGESTION_USERS must configure at least one user to run ingestion.")
 
     store = QdrantStore(url=settings.qdrant_url, collection=settings.qdrant_collection)
+    registered_keys = RegisteredKeyStore(settings.registered_keys_db_path)
     try:
-        for user in settings.ingestion_users:
-            logger.info("Sync: starting user_id=%s", user.user_id)
+        await registered_keys.setup()
+        user_ids = await registered_keys.list_user_ids()
+        if not user_ids:
+            raise RuntimeError(
+                "No users registered - generate an AiApiKey in StudyLife's settings first."
+            )
+        for user_id in user_ids:
+            logger.info("Sync: starting user_id=%s", user_id)
+            ai_api_key = await registered_keys.get(user_id)
+            if ai_api_key is None:
+                # Revoked between list_user_ids() and here - skip rather than
+                # sync with a stale/missing credential.
+                logger.info("Sync: user_id=%s was revoked mid-run, skipping", user_id)
+                continue
             try:
-                await _sync_user(user=user, settings=settings, store=store)
+                await _sync_user(
+                    user_id=user_id, ai_api_key=ai_api_key, settings=settings, store=store
+                )
             except Exception:
-                logger.exception("Sync: failed for user_id=%s, skipping", user.user_id)
+                logger.exception("Sync: failed for user_id=%s, skipping", user_id)
     finally:
         await store.close()
+        await registered_keys.close()
