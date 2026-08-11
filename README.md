@@ -1,6 +1,7 @@
 # StudyLife AI
 
 [![CI](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/lukislp/studylife-ai)](https://github.com/lukislp/studylife-ai/releases)
 [![License: AGPL-3.0](https://img.shields.io/github/license/lukislp/studylife-ai)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB)](https://www.python.org/)
 
