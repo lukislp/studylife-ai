@@ -32,7 +32,11 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "in brackets, e.g. [1]. If the notes above don't contain anything "
     "relevant to the question, say so honestly first, in the same language "
     "as the question — you may still attempt a general-knowledge answer "
-    "afterwards, but clearly mark that part as not coming from the notes."
+    "afterwards, but clearly mark that part as not coming from the notes. "
+    "If the question is about a schedule or study session (e.g. what's "
+    "planned today/tomorrow/this week) and nothing relevant was found above, "
+    "additionally mention that they can switch to Agent mode, which can plan "
+    "and create a study session for them directly."
 )
 
 _NO_NOTES_FOUND = "(no matching notes found)"
