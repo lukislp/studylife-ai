@@ -1,3 +1,10 @@
+## [1.3.4](https://github.com/lukislp/studylife-ai/compare/v1.3.3...v1.3.4) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** compute session date-offset labels deterministically, not via LLM ([a293e2f](https://github.com/lukislp/studylife-ai/commit/a293e2f82eff1f06830e2f9b2109fa13d76b982f))
+
 ## [1.3.3](https://github.com/lukislp/studylife-ai/compare/v1.3.2...v1.3.3) (2026-08-11)
 
 
