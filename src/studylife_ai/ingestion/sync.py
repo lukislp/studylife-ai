@@ -17,7 +17,12 @@ from collections.abc import Callable, Sequence
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.chunking import chunk_text
 from studylife_ai.ingestion.qdrant_store import ContentType, EntityChunkMetadata, QdrantStore
-from studylife_ai.ingestion.rendering import render_course, render_course_goal, render_session
+from studylife_ai.ingestion.rendering import (
+    DATETIME_FORMAT,
+    render_course,
+    render_course_goal,
+    render_session,
+)
 from studylife_ai.llm.embeddings import embed_texts
 from studylife_ai.studylife.client import StudyLifeClient
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
@@ -65,6 +70,16 @@ async def _sync_content_type[T](
     session_id: Callable[[T], int | None],
 ) -> None:
     current_ids = {entity_id(e) for e in entities}
+    if len(current_ids) != len(entities):
+        # Two entities mapped to the same entity_id (e.g. more than one
+        # course goal for the same course, which entity_id=course_id
+        # assumes never happens) - only the last-diffed one survives the
+        # upsert below, silently. Surfacing it here beats a silent data loss.
+        logger.warning(
+            "Sync[%s]: %d entities share an entity_id with another - only one will be kept",
+            content_type,
+            len(entities) - len(current_ids),
+        )
     known_ids = {eid for (ctype, eid) in known if ctype == content_type}
     deleted_ids = known_ids - current_ids
     changed = [e for e in entities if known.get((content_type, entity_id(e))) != fingerprint(e)]
@@ -166,7 +181,7 @@ async def sync_all(settings: Settings) -> None:
             entity_id=lambda s: s.id,
             fingerprint=fingerprint_session,
             render_text=render_session,
-            title=lambda s: f"{s.course_name}, {s.start_time:%Y-%m-%d %H:%M}",
+            title=lambda s: f"{s.course_name}, {s.start_time.strftime(DATETIME_FORMAT)}",
             course_id=lambda s: s.course_id,
             session_id=lambda _s: None,
         )

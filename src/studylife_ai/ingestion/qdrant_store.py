@@ -150,7 +150,7 @@ class QdrantStore:
             if point.payload is not None
         ]
 
-    async def delete_entity(self, *, content_type: str, entity_id: int) -> None:
+    async def delete_entity(self, *, content_type: ContentType, entity_id: int) -> None:
         """No-op if the collection doesn't exist yet — nothing to delete.
 
         Filters on both `content_type` and `entity_id` - a course and a note

@@ -201,6 +201,23 @@ async def test_sync_ingests_new_course_goal_keyed_by_course_id(monkeypatch: Monk
     assert kwargs["metadata"].entity_id == 6
 
 
+async def test_sync_warns_when_two_course_goals_share_a_course_id(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # CourseGoalDto has no own id - entity_id falls back to course_id, which
+    # assumes the API never returns more than one goal per course. If it
+    # ever does, only one survives the upsert; this must at least be logged.
+    goal_a = _course_goal(course_id=6)
+    goal_b = CourseGoalDto(course_id=6, course_name="Lineare Algebra", tag="duplicate")
+    fake_client = FakeStudyLifeClient(course_goals=[goal_a, goal_b])
+    fake_store = FakeQdrantStore(known={})
+
+    with caplog.at_level("WARNING", logger="studylife_ai.ingestion.sync"):
+        await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    assert any("share an entity_id" in record.message for record in caplog.records)
+
+
 async def test_sync_deletes_course_goal_when_its_course_disappears(
     monkeypatch: MonkeyPatch,
 ) -> None:

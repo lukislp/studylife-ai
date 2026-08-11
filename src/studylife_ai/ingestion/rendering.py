@@ -13,7 +13,9 @@ user wrote it in - same language-neutral approach as the RAG prompt itself.
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudySessionDto
 
 _DATE_FORMAT = "%Y-%m-%d"
-_DATETIME_FORMAT = "%Y-%m-%d %H:%M"
+# Public - sync.py's session title also needs this, to stay in sync with
+# render_session()'s own use of it rather than duplicating the literal.
+DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
 
 def render_course(course: CourseDto) -> str:
@@ -29,8 +31,8 @@ def render_course(course: CourseDto) -> str:
 def render_session(session: StudySessionDto) -> str:
     lines = [
         f"Study session: {session.course_name}, "
-        f"{session.start_time.strftime(_DATETIME_FORMAT)} - "
-        f"{session.end_time.strftime(_DATETIME_FORMAT)}",
+        f"{session.start_time.strftime(DATETIME_FORMAT)} - "
+        f"{session.end_time.strftime(DATETIME_FORMAT)}",
         f"Status: {'Completed' if session.is_completed else 'Planned'}",
     ]
     if session.topic:
@@ -47,7 +49,7 @@ def render_course_goal(goal: CourseGoalDto) -> str:
     if goal.grade is not None:
         lines.append(f"Grade: {goal.grade}")
     if goal.completed_at:
-        lines.append(f"Completed at: {goal.completed_at.strftime(_DATETIME_FORMAT)}")
+        lines.append(f"Completed at: {goal.completed_at.strftime(DATETIME_FORMAT)}")
     if goal.completed_topics:
         lines.append(f"Completed topics: {goal.completed_topics}")
     if goal.completion_note:
