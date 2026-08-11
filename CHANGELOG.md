@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/lukislp/studylife-ai/compare/v1.3.6...v1.4.0) (2026-08-11)
+
+
+### Features
+
+* **security:** add per-user rate limiting to /chat and /agent ([798a4aa](https://github.com/lukislp/studylife-ai/commit/798a4aafd1480d474140901c4f1bf00f847cf297))
+
 ## [1.3.5](https://github.com/lukislp/studylife-ai/compare/v1.3.4...v1.3.5) (2026-08-11)
 
 
