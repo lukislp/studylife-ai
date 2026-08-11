@@ -17,6 +17,7 @@ from ragas.dataset_schema import EvaluationResult, MultiTurnSample, SingleTurnSa
 from ragas.embeddings.base import BaseRagasEmbeddings
 from ragas.llms.base import BaseRagasLLM, LangchainLLMWrapper
 from ragas.metrics import AnswerRelevancy, Faithfulness, LLMContextPrecisionWithoutReference
+from ragas.run_config import RunConfig
 
 from studylife_ai.config import Settings
 from studylife_ai.eval.dataset import EvalCase
@@ -173,6 +174,14 @@ async def run_eval(cases: list[EvalCase], *, settings: Settings, store: QdrantSt
         metrics=[Faithfulness(), AnswerRelevancy(), LLMContextPrecisionWithoutReference()],
         llm=judge_llm,
         embeddings=judge_embeddings,
+        # Lower concurrency, longer per-job timeout than RunConfig's defaults
+        # (max_workers=16, timeout=180s): CI (GitHub Actions -> OpenAI) hit
+        # repeated executor-level TimeoutErrors at the defaults, mainly on
+        # Faithfulness (the most LLM-call-heavy metric per case) - see
+        # docs/decisions.md. Fewer in-flight requests and more slack per
+        # request costs wall-clock time, which this job doesn't need to
+        # minimize.
+        run_config=RunConfig(timeout=300, max_workers=4),
     )
     # evaluate() is typed to also allow an Executor, but that only happens when
     # return_executor=True is passed - we never do, so this is always an EvaluationResult.
