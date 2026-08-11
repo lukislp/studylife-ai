@@ -32,7 +32,7 @@ def _chunk_of_type(entity_id: int, title: str, content_type: str, score: float) 
     )
 
 
-async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type(
+async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type_except_session(
     monkeypatch: MonkeyPatch,
 ) -> None:
     fetched_types: list[object] = []
@@ -54,8 +54,40 @@ async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type(
         "query", store=AsyncMock(), settings=_settings(rerank_model=None), user_id="primary"
     )
 
-    assert set(fetched_types) == {"note", "course", "session", "course_goal"}
-    assert len(fetched_types) == 4
+    # session deliberately does NOT go through the per-type vector-similarity quota (see
+    # retrieval.py's module docstring / QdrantStore.get_all_chunks) - covered separately below.
+    assert set(fetched_types) == {"note", "course", "course_goal"}
+    assert len(fetched_types) == 3
+
+
+async def test_retrieve_with_rerank_fetches_every_session_via_get_all_chunks(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
+        calls.append(kwargs)
+        return [_chunk_of_type(1, "today's session", "session", 0.0)]
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    store = AsyncMock()
+    store.get_all_chunks = fake_get_all_chunks
+
+    result = await retrieve_with_rerank(
+        "query", store=store, settings=_settings(rerank_model=None), user_id="primary"
+    )
+
+    assert calls == [{"user_id": "primary", "content_type": "session"}]
+    assert [c.title for c in result] == ["today's session"]
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
@@ -64,12 +96,14 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     per_type_results = {
         "note": [_chunk_of_type(1, "note-hi", "note", 0.5)],
         "course": [_chunk_of_type(2, "course-hi", "course", 0.9)],
-        "session": [_chunk_of_type(3, "session-lo", "session", 0.1)],
         "course_goal": [_chunk_of_type(4, "goal-mid", "course_goal", 0.6)],
     }
 
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
         return per_type_results[kwargs["content_type"]]
+
+    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
+        return [_chunk_of_type(3, "session-lo", "session", 0.1)]
 
     async def fake_embed_texts(
         texts: list[str], *, model: str, **_kwargs: object
@@ -82,10 +116,12 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
     monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
+    store = AsyncMock()
+    store.get_all_chunks = fake_get_all_chunks
 
     result = await retrieve_with_rerank(
         "query",
-        store=AsyncMock(),
+        store=store,
         settings=_settings(rerank_model=None, retrieval_top_k=4),
         user_id="primary",
     )
@@ -101,6 +137,9 @@ async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
         return [candidates.pop(0)] if candidates else []
 
+    async def fake_get_all_chunks(**kwargs: object) -> list[RetrievedChunk]:
+        return [candidates.pop(0)] if candidates else []
+
     async def fake_embed_texts(
         texts: list[str], *, model: str, **_kwargs: object
     ) -> list[list[float]]:
@@ -114,10 +153,12 @@ async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
     monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
+    store = AsyncMock()
+    store.get_all_chunks = fake_get_all_chunks
 
     result = await retrieve_with_rerank(
         "query",
-        store=AsyncMock(),
+        store=store,
         settings=_settings(rerank_model="ollama/llama3.2", retrieval_top_k=4),
         user_id="primary",
     )

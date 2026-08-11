@@ -100,6 +100,66 @@ class QdrantStore:
                 break
         return known
 
+    async def get_all_chunks(
+        self, *, user_id: str, content_type: ContentType, safety_cap: int = 1000
+    ) -> list[RetrievedChunk]:
+        """Every chunk of one content type for one user, unordered (no vector search - a plain
+        scroll, same pagination pattern as `get_known_fingerprints()`).
+
+        For content types where relevance genuinely depends on something a text embedding can't
+        see - `session`'s "is this near today?" - the vector-similarity top-k in `search()` can
+        starve out the correct answer entirely before an LLM reranker ever gets a chance to look
+        at it (confirmed live: the same 5 textually-similar-but-months-old sessions always won
+        the embedding-similarity race over the two sessions actually happening today). This
+        trades that away for "the reranker sees everything, decides what's actually relevant" -
+        correct by construction, at the cost of a larger rerank prompt. `safety_cap` exists only
+        as a defensive bound against a pathological account history, not as an intended limit at
+        personal scale (see docs/decisions.md "Retrieval design").
+        """
+        if not await self.collection_exists():
+            return []
+        chunks: list[RetrievedChunk] = []
+        offset = None
+        while len(chunks) < safety_cap:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        _user_id_condition(user_id),
+                        models.FieldCondition(
+                            key="content_type", match=models.MatchValue(value=content_type)
+                        ),
+                    ]
+                ),
+                with_payload=True,
+                with_vectors=False,
+                limit=256,
+                offset=offset,
+            )
+            for point in points:
+                payload = point.payload or {}
+                if not payload:
+                    continue
+                chunks.append(
+                    RetrievedChunk(
+                        content_type=payload["content_type"],
+                        entity_id=payload["entity_id"],
+                        chunk_index=payload["chunk_index"],
+                        content=payload["content"],
+                        title=payload["title"],
+                        course_id=payload["course_id"],
+                        session_id=payload["session_id"],
+                        # No similarity score for a scroll fetch - 0.0 sorts these last in the
+                        # naive score-only fallback ordering used when rerank_model is unset;
+                        # harmless there (that path never claimed date-awareness either) and
+                        # irrelevant once reranking is active, which is what this exists for.
+                        score=0.0,
+                    )
+                )
+            if offset is None:
+                break
+        return chunks[:safety_cap]
+
     async def replace_entity(
         self,
         *,

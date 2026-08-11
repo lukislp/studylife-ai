@@ -65,6 +65,75 @@ async def test_get_known_fingerprints_paginates_and_dedupes_by_content_type_and_
     assert condition.match.value == "primary"
 
 
+async def test_get_all_chunks_returns_empty_when_collection_missing() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=False)
+
+    assert await store.get_all_chunks(user_id="primary", content_type="session") == []
+
+
+async def test_get_all_chunks_paginates_filters_by_type_and_scores_zero() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+
+    def _point(entity_id: int, title: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            payload={
+                "content_type": "session",
+                "entity_id": entity_id,
+                "chunk_index": 0,
+                "content": f"content-{entity_id}",
+                "title": title,
+                "course_id": None,
+                "session_id": None,
+            }
+        )
+
+    page1 = ([_point(1, "Session A")], "next-offset")
+    page2 = ([_point(2, "Session B")], None)
+    store._client.scroll = AsyncMock(side_effect=[page1, page2])
+
+    result = await store.get_all_chunks(user_id="primary", content_type="session")
+
+    assert [c.title for c in result] == ["Session A", "Session B"]
+    assert all(c.score == 0.0 for c in result)
+    assert store._client.scroll.await_count == 2
+    _, kwargs = store._client.scroll.call_args
+    conditions = kwargs["scroll_filter"].must
+    assert conditions[0].key == "user_id"
+    assert conditions[0].match.value == "primary"
+    assert conditions[1].key == "content_type"
+    assert conditions[1].match.value == "session"
+
+
+async def test_get_all_chunks_stops_at_safety_cap() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+
+    def _page(offset: str | None) -> tuple[list[SimpleNamespace], str | None]:
+        points = [
+            SimpleNamespace(
+                payload={
+                    "content_type": "session",
+                    "entity_id": i,
+                    "chunk_index": 0,
+                    "content": "x",
+                    "title": f"s{i}",
+                    "course_id": None,
+                    "session_id": None,
+                }
+            )
+            for i in range(256)
+        ]
+        return points, "more"
+
+    store._client.scroll = AsyncMock(side_effect=lambda **kwargs: _page(kwargs.get("offset")))
+
+    result = await store.get_all_chunks(user_id="primary", content_type="session", safety_cap=300)
+
+    assert len(result) == 300
+
+
 async def test_replace_entity_deletes_existing_then_upserts_new_chunks() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)

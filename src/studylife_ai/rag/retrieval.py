@@ -6,7 +6,13 @@ per-content-type candidate quota instead of one global top-k - without this,
 a single popular course's ~90 near-duplicate session chunks can crowd a
 genuinely relevant note out of the running entirely, confirmed live - then
 optionally reranks the merged pool with an LLM when `Settings.rerank_model`
-is set.
+is set. `session` is the one exception to the quota: it bypasses vector
+search entirely and fetches every one of the user's sessions instead (see
+`QdrantStore.get_all_chunks()`, docs/decisions.md "Retrieval design") - a
+text embedding has no way to rank a session by date proximity to "today",
+so a similarity top-k can permanently exclude the one session that's
+actually relevant to a date-relative question, before reranking ever gets a
+chance to judge it.
 """
 
 import asyncio
@@ -42,6 +48,17 @@ async def _search_by_vector(
         )
     except Exception:
         logger.exception("Qdrant search failed for content_type=%s", content_type)
+        return []
+
+
+async def _fetch_all(
+    store: QdrantStore, *, user_id: str, content_type: ContentType
+) -> list[RetrievedChunk]:
+    """Same never-raises contract as `_search_by_vector` above, for `get_all_chunks()`."""
+    try:
+        return await store.get_all_chunks(user_id=user_id, content_type=content_type)
+    except Exception:
+        logger.exception("Qdrant scroll failed for content_type=%s", content_type)
         return []
 
 
@@ -87,9 +104,17 @@ async def retrieve_with_rerank(
         )
     else:
         per_type_k = max(1, settings.rerank_candidate_k // len(_CONTENT_TYPES))
+        # "session" bypasses the vector-similarity quota entirely (see
+        # QdrantStore.get_all_chunks docstring) - a text embedding has no way to know a
+        # session's date is close to today, so the top-k-by-similarity slice can permanently
+        # exclude the one session that's actually relevant to a "what's on today?"-style
+        # question, before the (date-aware, see rag/rerank.py) reranker ever gets a chance to
+        # judge it. Personal-scale account sizes make "hand the reranker everything" affordable.
         results = await asyncio.gather(
             *(
-                _search_by_vector(
+                _fetch_all(store, user_id=user_id, content_type=ct)
+                if ct == "session"
+                else _search_by_vector(
                     vector,
                     store=store,
                     user_id=user_id,
