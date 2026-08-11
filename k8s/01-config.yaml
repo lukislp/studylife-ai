@@ -8,15 +8,20 @@
 # silently reapplied over any manual substitution on every reconcile (found live once already,
 # see docs/decisions.md "M5 - Deployment design").
 #
-# Cluster-internal Service DNS, not the public https://studylife.heim.lan hostname used
-# initially: found live that studylife-ai's container has no reason to trust StudyLife's
-# internal cert-manager CA (studylife-internal-ca-issuer, a private CA - not publicly trusted),
-# so httpx failed every request with CERTIFICATE_VERIFY_FAILED. Plain HTTP, cluster-internal
-# only - no TLS hop needed at all for pure pod-to-pod traffic within the same cluster, and no
-# certificate to distribute/trust. Needs a matching NetworkPolicy on the studylife-scale side
-# (studylife repo's k8s/12-network-policies.yaml) allowing ingress from the studylife-ai
-# namespace to studylife-web on port 8080 - StudyLife's own default-deny-ingress otherwise
-# blocks it, same as it already blocks every other unlisted source.
+# Cluster-internal Service DNS, not the public https://studylife.heim.lan hostname: avoids the
+# round-trip through the public Gateway for pure pod-to-pod traffic within the same cluster.
+# HTTPS is mandatory even internally - StudyLife's own UseHttpsRedirection forces it
+# unconditionally - so this trusts StudyLife's internal cert-manager CA via
+# STUDYLIFE_CA_CERT_PATH (k8s/06-studylife-ca.yaml) rather than using plain HTTP.
+#
+# No explicit port in the URL - the Service exposes 80/443 (mapping to the pod's real
+# 8080/8443), NOT 8080/8443 directly; found live via a raw TCP test (ClusterIP:8443 timed out,
+# ClusterIP:443 connected) after a NetworkPolicy fix alone didn't resolve a ConnectTimeout - the
+# Service's own port was the actual remaining mismatch, not the policy. The matching
+# NetworkPolicy (studylife repo's k8s/12-network-policies.yaml, allow-studylife-ai-to-web) still
+# has to allow the pod's real target port 8443 - NetworkPolicy `ports` matches the destination
+# pod's port, not the Service's, so this is correct independent of the Service-port confusion
+# above.
 #
 # Production runs the API-provider LLM/embedding path (no in-cluster Ollama - decided for this
 # milestone: Ollama on the cluster's arm64/Raspberry-Pi-class hardware isn't practical, matching
@@ -42,7 +47,7 @@ data:
   # URL round-tripped through a 307 redirect back to :8443 anyway). STUDYLIFE_CA_CERT_PATH
   # points at the mounted CA cert (k8s/06-studylife-ca.yaml) needed to verify that connection -
   # StudyLife's internal cert-manager CA isn't in any public trust store.
-  STUDYLIFE_API_BASE_URL: "https://studylife-web.studylife-scale.svc.cluster.local:8443"
+  STUDYLIFE_API_BASE_URL: "https://studylife-web.studylife-scale.svc.cluster.local"
   STUDYLIFE_CA_CERT_PATH: "/etc/studylife-ca/ca.crt"
 
   EMBEDDING_MODEL: "openai/text-embedding-3-small"
