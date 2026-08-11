@@ -18,17 +18,20 @@ _CONTENT_PREVIEW_CHARS = 300
 _PROMPT_TEMPLATE = (
     "Today's date is {today}.\n\n"
     "Rank the following passages by relevance to the question, most relevant "
-    "first. If the question refers to a specific date or date range (e.g. "
-    '"today", "this week", "tomorrow", "yesterday"), first work out exactly '
-    "which calendar date(s) that refers to, relative to today - direction "
-    'matters, not just closeness: "tomorrow" means exactly one day AFTER '
-    "today, and a session from a few days ago is NOT a match for it just "
-    "because it's nearby in time. A session passage whose own date doesn't "
-    "fall on that resolved date/range is NOT relevant, even if it shares the "
-    "same topic or course as a well-matching passage - prefer the passage "
-    "whose own date genuinely matches what's being asked, over one that just "
-    "reads similarly. Reply with ONLY the passage numbers, comma-separated, "
-    'most to least relevant - e.g. "2,0,4,1,3". No other text.\n\n'
+    "first. If the question refers to a specific date or date range - in "
+    'any language, and however it\'s phrased, e.g. "today", "tomorrow", '
+    '"day after tomorrow"/"übermorgen", "yesterday", "next Monday", '
+    '"in 3 days", "this week" - first compute the EXACT calendar '
+    "date(s) that refers to, relative to today. Both direction and exact "
+    'offset matter, not just rough closeness: "day after tomorrow" means '
+    "precisely two days after today, and a session one day off (tomorrow, "
+    "or three days out) is NOT a match for it just because it's nearby in "
+    "time. A session passage whose own date doesn't fall exactly on that "
+    "resolved date/range is NOT relevant, even if it shares the same topic "
+    "or course as a well-matching passage - prefer the passage whose own "
+    "date genuinely matches what's being asked, over one that just reads "
+    "similarly. Reply with ONLY the passage numbers, comma-separated, most "
+    'to least relevant - e.g. "2,0,4,1,3". No other text.\n\n'
     "Question: {query}\n\n"
     "Passages:\n{passages}"
 )
