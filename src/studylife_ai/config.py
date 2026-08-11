@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     # that decision). Set to "openai/gpt-4o-mini" in .env.
     eval_judge_model: str | None = None
 
+    # M4 agent (see docs/decisions.md "M4 agent stack"): SQLite file backing
+    # the LangGraph checkpointer that holds a proposed-but-not-yet-confirmed
+    # write action's paused state. Persists across a service restart between
+    # /agent (propose) and /agent/confirm - an in-memory checkpointer would
+    # lose a pending action on restart, which a write-confirmation flow
+    # specifically must not do.
+    agent_checkpoint_db_path: str = "agent_checkpoints.db"
+
 
 @lru_cache
 def get_settings() -> Settings:

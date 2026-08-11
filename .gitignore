@@ -30,3 +30,6 @@ htmlcov/
 # Docker volumes mounted locally (if any)
 qdrant_storage/
 ollama_data/
+
+# M4 agent: local SQLite checkpointer for pending write-confirmation state
+agent_checkpoints.db*
