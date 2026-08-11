@@ -24,7 +24,7 @@ from studylife_ai.eval.dataset import EvalCase
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.llm.client import stream_chat_completion
 from studylife_ai.rag.prompt import build_context_system_message
-from studylife_ai.rag.retrieval import retrieve_chunks
+from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.schemas.chat import ChatMessage
 
 
@@ -62,13 +62,7 @@ async def _generate_answer(
 ) -> tuple[str, list[RetrievedChunk]]:
     """Same retrieval + prompt-construction + generation as /chat, but returns
     the full joined answer instead of an SSE stream."""
-    chunks = await retrieve_chunks(
-        question,
-        store=store,
-        embedding_model=settings.embedding_model,
-        user_id=settings.studylife_user_id,
-        top_k=settings.retrieval_top_k,
-    )
+    chunks = await retrieve_with_rerank(question, store=store, settings=settings)
     context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
     messages = [context_message, ChatMessage(role="user", content=question)]
     deltas = [

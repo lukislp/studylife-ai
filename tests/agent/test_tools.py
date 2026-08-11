@@ -46,7 +46,7 @@ async def test_list_courses_returns_id_name_code_ects() -> None:
 async def test_search_notes_filters_to_note_content_type(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_retrieve_chunks(query: str, **kwargs: object) -> list[RetrievedChunk]:
+    async def fake_retrieve_with_rerank(query: str, **kwargs: object) -> list[RetrievedChunk]:
         captured["query"] = query
         captured.update(kwargs)
         return [
@@ -62,7 +62,7 @@ async def test_search_notes_filters_to_note_content_type(monkeypatch: MonkeyPatc
             )
         ]
 
-    monkeypatch.setattr(tools_module, "retrieve_chunks", fake_retrieve_chunks)
+    monkeypatch.setattr(tools_module, "retrieve_with_rerank", fake_retrieve_with_rerank)
     tool = _tools_with()["search_notes"]
 
     result = await tool.ainvoke({"query": "Eigenwerte"})

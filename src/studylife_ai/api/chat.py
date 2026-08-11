@@ -20,7 +20,7 @@ from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.llm.client import stream_chat_completion
 from studylife_ai.rag.prompt import build_context_system_message, sources_payload
-from studylife_ai.rag.retrieval import retrieve_chunks
+from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.schemas.chat import ChatMessage, ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -38,13 +38,7 @@ def _latest_user_message(messages: list[ChatMessage]) -> str:
 async def _retrieve_context(
     query: str, settings: Settings, store: QdrantStore
 ) -> list[RetrievedChunk]:
-    return await retrieve_chunks(
-        query,
-        store=store,
-        embedding_model=settings.embedding_model,
-        user_id=settings.studylife_user_id,
-        top_k=settings.retrieval_top_k,
-    )
+    return await retrieve_with_rerank(query, store=store, settings=settings)
 
 
 async def _sse_event_stream(request: ChatRequest, store: QdrantStore) -> AsyncIterator[str]:

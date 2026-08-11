@@ -86,16 +86,16 @@ async def test_generate_answer_retrieves_context_and_joins_streamed_deltas(
 ) -> None:
     chunk = _chunk(1, "Eigenwerte", "det(A - λI) = 0")
 
-    async def fake_retrieve_chunks(
-        query: str, *, store: object, embedding_model: str, user_id: str, top_k: int
+    async def fake_retrieve_with_rerank(
+        query: str, *, store: object, settings: Settings
     ) -> list[RetrievedChunk]:
         assert query == "Was sind Eigenwerte?"
-        assert embedding_model == "ollama/nomic-embed-text"
-        assert user_id == "primary"
-        assert top_k == 5
+        assert settings.embedding_model == "ollama/nomic-embed-text"
+        assert settings.studylife_user_id == "primary"
+        assert settings.retrieval_top_k == 5
         return [chunk]
 
-    monkeypatch.setattr(runner_module, "retrieve_chunks", fake_retrieve_chunks)
+    monkeypatch.setattr(runner_module, "retrieve_with_rerank", fake_retrieve_with_rerank)
 
     async def fake_acompletion(*_args: object, **_kwargs: object) -> object:
         async def stream() -> object:

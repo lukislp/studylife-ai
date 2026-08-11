@@ -11,7 +11,7 @@ from langchain_core.tools import BaseTool, tool
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
-from studylife_ai.rag.retrieval import retrieve_chunks
+from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.studylife.client import StudyLifeClient
 from studylife_ai.studylife.models import StudySessionDto
 
@@ -38,13 +38,8 @@ def build_tools(
         Args:
             query: What to search for, e.g. "Statistik Hypothesentests".
         """
-        chunks = await retrieve_chunks(
-            query,
-            store=store,
-            embedding_model=settings.embedding_model,
-            user_id=settings.studylife_user_id,
-            top_k=settings.retrieval_top_k,
-            content_type="note",
+        chunks = await retrieve_with_rerank(
+            query, store=store, settings=settings, content_type="note"
         )
         return [{"title": c.title, "content": c.content} for c in chunks]
 
