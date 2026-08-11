@@ -38,6 +38,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["agent"])
 
 _NOT_CONFIGURED_DETAIL = "Agent not available - STUDYLIFE_API_BASE_URL must be set."
+
+# The agent otherwise has no system prompt at all - behavior is driven entirely by tool
+# docstrings (see agent/tools.py). Live testing showed that's not enough for this one rule:
+# "never guess an id" (already in create_study_session's docstring) stops the model from
+# inventing a nonexistent course, but doesn't stop it from silently picking one of several
+# real, plausible candidates (e.g. "Maschinelles Lehrnen" matching both real ML courses) -
+# the model treated "pick a real id" and "guess which real id" as different things. Stated
+# once here so it applies to every write tool that resolves a name against a list (currently
+# create_study_session and save_note's course_id), not just the one that was tested.
+_AGENT_SYSTEM_PROMPT = (
+    "When resolving a name (e.g. a course) the user mentioned against a list you looked up "
+    "(e.g. via list_courses), only proceed if exactly one entry plausibly matches. If more "
+    "than one entry could plausibly match what the user described, do not guess between them "
+    "- ask the user to clarify which one they mean before proposing a write action."
+)
 _NO_KEY_REGISTERED_DETAIL = (
     "No AiApiKey registered for this user - generate one in StudyLife's settings first."
 )
@@ -145,6 +160,7 @@ async def run_agent(
             http_request.app.state.agent_checkpointer,
             {
                 "messages": [
+                    SystemMessage(_AGENT_SYSTEM_PROMPT),
                     SystemMessage(f"The current date and time is {now}."),
                     HumanMessage(request.message),
                 ]
