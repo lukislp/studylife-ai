@@ -21,7 +21,6 @@ def _settings() -> Settings:
         embedding_model="ollama/nomic-embed-text",
         llm_model="ollama/llama3.2",
         llm_api_base="http://localhost:11434",
-        studylife_user_id="primary",
         retrieval_top_k=5,
     )
 
@@ -37,7 +36,9 @@ def _build_agent_with_fake_model(monkeypatch: MonkeyPatch, responses: list[AIMes
         start_time=datetime(2026, 8, 12, 10, 0),
         end_time=datetime(2026, 8, 12, 11, 0),
     )
-    tools = build_tools(studylife=fake_studylife, store=AsyncMock(), settings=_settings())
+    tools = build_tools(
+        studylife=fake_studylife, store=AsyncMock(), settings=_settings(), user_id="test-user"
+    )
     agent = build_agent(tools=tools, checkpointer=InMemorySaver(), settings=_settings())
     return agent, fake_studylife
 

@@ -13,7 +13,6 @@ from studylife_ai.studylife.models import CourseDto, StudyLifeNote, StudySession
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "embedding_model": "ollama/nomic-embed-text",
-        "studylife_user_id": "primary",
         "retrieval_top_k": 5,
     }
     defaults.update(overrides)
@@ -21,12 +20,17 @@ def _settings(**overrides: object) -> Settings:
 
 
 def _tools_with(
-    *, studylife: object = None, store: object = None, settings: Settings | None = None
+    *,
+    studylife: object = None,
+    store: object = None,
+    settings: Settings | None = None,
+    user_id: str = "test-user",
 ) -> dict[str, object]:
     built = build_tools(
         studylife=studylife or AsyncMock(),
         store=store or AsyncMock(),
         settings=settings or _settings(),
+        user_id=user_id,
     )
     return {t.name: t for t in built}
 
@@ -63,11 +67,12 @@ async def test_search_notes_filters_to_note_content_type(monkeypatch: MonkeyPatc
         ]
 
     monkeypatch.setattr(tools_module, "retrieve_with_rerank", fake_retrieve_with_rerank)
-    tool = _tools_with()["search_notes"]
+    tool = _tools_with(user_id="alice")["search_notes"]
 
     result = await tool.ainvoke({"query": "Eigenwerte"})
 
     assert captured["content_type"] == "note"
+    assert captured["user_id"] == "alice"
     assert result == [{"title": "Eigenwerte", "content": "det(A - λI) = 0"}]
 
 

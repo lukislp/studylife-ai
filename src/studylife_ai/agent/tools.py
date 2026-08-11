@@ -1,8 +1,10 @@
 """Agent tools: two read tools (execute immediately) and two write tools
 (never execute directly - HumanInTheLoopMiddleware pauses before them, see
-`agent/graph.py`). Built as closures over already-app-lifetime resources
-(`StudyLifeClient`, `QdrantStore`) via a factory, so tools don't need their
-own dependency-injection machinery.
+`agent/graph.py`). Built as closures over the calling user's own resources
+(`StudyLifeClient`, `QdrantStore`, `user_id`) via a factory, so tools don't
+need their own dependency-injection machinery. `build_tools()` is called
+fresh per `/agent` request, not once at startup (see docs/decisions.md
+"M4.5 Multi-user support" - "Agent graph: rebuilt per request").
 """
 
 from datetime import datetime
@@ -17,7 +19,7 @@ from studylife_ai.studylife.models import StudySessionDto
 
 
 def build_tools(
-    *, studylife: StudyLifeClient, store: QdrantStore, settings: Settings
+    *, studylife: StudyLifeClient, store: QdrantStore, settings: Settings, user_id: str
 ) -> list[BaseTool]:
     @tool
     async def list_courses() -> list[dict[str, object]]:
@@ -39,7 +41,7 @@ def build_tools(
             query: What to search for, e.g. "Statistik Hypothesentests".
         """
         chunks = await retrieve_with_rerank(
-            query, store=store, settings=settings, content_type="note"
+            query, store=store, settings=settings, user_id=user_id, content_type="note"
         )
         return [{"title": c.title, "content": c.content} for c in chunks]
 

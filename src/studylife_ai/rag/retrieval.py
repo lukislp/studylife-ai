@@ -49,10 +49,13 @@ async def retrieve_with_rerank(
     *,
     store: QdrantStore,
     settings: Settings,
+    user_id: str,
     content_type: ContentType | None = None,
 ) -> list[RetrievedChunk]:
     """Retrieval entry point used by /chat, the eval pipeline, and the
-    search_notes agent tool.
+    search_notes agent tool. `user_id` scopes every search to one user's
+    Qdrant partition - resolved per-request from headers for /chat and the
+    agent, fixed for eval (see docs/decisions.md "M4.5 Multi-user support").
 
     When `content_type` is given, fetches a single `rerank_candidate_k`-sized
     pool for that type (no cross-type crowding is possible when already
@@ -77,7 +80,7 @@ async def retrieve_with_rerank(
         chunks = await _search_by_vector(
             vector,
             store=store,
-            user_id=settings.studylife_user_id,
+            user_id=user_id,
             top_k=settings.rerank_candidate_k,
             content_type=content_type,
         )
@@ -88,7 +91,7 @@ async def retrieve_with_rerank(
                 _search_by_vector(
                     vector,
                     store=store,
-                    user_id=settings.studylife_user_id,
+                    user_id=user_id,
                     top_k=per_type_k,
                     content_type=ct,
                 )

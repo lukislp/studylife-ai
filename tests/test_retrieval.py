@@ -11,7 +11,6 @@ from studylife_ai.rag.retrieval import retrieve_with_rerank
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "embedding_model": "ollama/nomic-embed-text",
-        "studylife_user_id": "primary",
         "retrieval_top_k": 5,
         "rerank_candidate_k": 20,
         "rerank_model": None,
@@ -49,7 +48,9 @@ async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type(
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
 
-    await retrieve_with_rerank("query", store=AsyncMock(), settings=_settings(rerank_model=None))
+    await retrieve_with_rerank(
+        "query", store=AsyncMock(), settings=_settings(rerank_model=None), user_id="primary"
+    )
 
     assert set(fetched_types) == {"note", "course", "session", "course_goal"}
     assert len(fetched_types) == 4
@@ -79,7 +80,10 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
 
     result = await retrieve_with_rerank(
-        "query", store=AsyncMock(), settings=_settings(rerank_model=None, retrieval_top_k=4)
+        "query",
+        store=AsyncMock(),
+        settings=_settings(rerank_model=None, retrieval_top_k=4),
+        user_id="primary",
     )
 
     assert [c.title for c in result] == ["course-hi", "goal-mid", "note-hi", "session-lo"]
@@ -109,6 +113,7 @@ async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
         "query",
         store=AsyncMock(),
         settings=_settings(rerank_model="ollama/llama3.2", retrieval_top_k=4),
+        user_id="primary",
     )
 
     assert [c.title for c in result] == ["chunk-3", "chunk-2", "chunk-1", "chunk-0"]
@@ -130,7 +135,11 @@ async def test_retrieve_with_rerank_with_explicit_content_type_skips_per_type_sp
     monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
 
     result = await retrieve_with_rerank(
-        "query", store=AsyncMock(), settings=_settings(rerank_model=None), content_type="note"
+        "query",
+        store=AsyncMock(),
+        settings=_settings(rerank_model=None),
+        user_id="primary",
+        content_type="note",
     )
 
     assert captured["content_type"] == "note"
@@ -146,7 +155,9 @@ async def test_retrieve_with_rerank_returns_empty_when_embedding_fails(
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
 
-    result = await retrieve_with_rerank("query", store=AsyncMock(), settings=_settings())
+    result = await retrieve_with_rerank(
+        "query", store=AsyncMock(), settings=_settings(), user_id="primary"
+    )
 
     assert result == []
 
@@ -170,6 +181,8 @@ async def test_a_single_content_types_search_failure_does_not_abort_the_others(
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
 
-    result = await retrieve_with_rerank("query", store=store, settings=_settings(rerank_model=None))
+    result = await retrieve_with_rerank(
+        "query", store=store, settings=_settings(rerank_model=None), user_id="primary"
+    )
 
     assert {c.content_type for c in result} == {"note", "course", "course_goal"}
