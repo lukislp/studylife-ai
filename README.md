@@ -13,9 +13,9 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
 
-## Status: M2 (RAG v1) done
+## Status: M3 (Eval) done
 
-M1 (scaffold, `/health`, streaming `/chat`) is done. M2 is done: ingestion diffs StudyLife's notes against Qdrant and keeps chunks in sync (see [Ingestion](#ingestion)), and `/chat` is now RAG-augmented — every request retrieves relevant note chunks and answers with inline `[n]` citations plus a deterministic source list (design in [docs/decisions.md](docs/decisions.md)). End-to-end tested against a local StudyLife dev instance with real demo data. See [Roadmap](#roadmap).
+M1 (scaffold, `/health`, streaming `/chat`) and M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)) are done. M3 is done: a versioned RAGAS eval set runs in CI on every push to `main`, scoring the real retrieval + generation pipeline (see [Evaluation](#evaluation)). See [Roadmap](#roadmap).
 
 ## Architecture
 
@@ -144,7 +144,7 @@ These are the first real numbers; no CI thresholds are set yet (see [docs/decisi
 
 - [x] **M1** — Repo scaffold: FastAPI service with `/health` and streaming `/chat` (LiteLLM, no RAG), Docker + Compose, CI (lint + tests), README v1.
 - [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
-- [ ] **M3** — Eval set + RAGAS in CI, baseline metrics.
+- [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [ ] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
