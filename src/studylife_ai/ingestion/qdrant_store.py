@@ -130,10 +130,13 @@ class QdrantStore:
     ) -> list[RetrievedChunk]:
         """Vector search scoped to a single user (see docs/decisions.md "Retrieval design").
 
-        `content_type` is an optional narrowing filter, not a change to the
-        v1 "no metadata filter" default - regular /chat retrieval still
-        omits it entirely. Added for the M4 `search_notes` agent tool, which
-        needs to search within notes only, not mix in courses/sessions.
+        `content_type` is an optional narrowing filter. `rag/retrieval.py`'s
+        `retrieve_with_rerank()` is the only caller that matters in practice:
+        it always passes a concrete `content_type` (see docs/decisions.md
+        "Retrieval quality: reranking + per-content-type quota") - one call
+        per content type when scoping the whole corpus, or a single call
+        already scoped to one type (e.g. the M4 `search_notes` agent tool,
+        which needs notes only, not courses/sessions mixed in).
         """
         if not await self.collection_exists():
             return []
