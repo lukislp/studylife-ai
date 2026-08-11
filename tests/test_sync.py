@@ -1,3 +1,4 @@
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -5,7 +6,7 @@ from pytest import MonkeyPatch
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion import sync as sync_module
-from studylife_ai.studylife.models import StudyLifeNote
+from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 
 
 def _settings(**overrides: object) -> Settings:
@@ -18,6 +19,7 @@ def _settings(**overrides: object) -> Settings:
         "qdrant_url": "http://qdrant.test:6333",
         "qdrant_collection": "studylife_notes",
         "studylife_user_id": "primary",
+        "studylife_session_history_days": 1825,
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -35,12 +37,51 @@ def _note(note_id: int, title: str, content: str) -> StudyLifeNote:
     )
 
 
+def _course(course_id: int, name: str) -> CourseDto:
+    return CourseDto(id=course_id, semester=3, name=name, code="X101", topics=[], ects=5)
+
+
+def _session(session_id: int, course_id: int) -> StudySessionDto:
+    return StudySessionDto(
+        id=session_id,
+        course_id=course_id,
+        course_name="Lineare Algebra",
+        start_time=datetime(2026, 8, 1, 10, 0),
+        end_time=datetime(2026, 8, 1, 11, 30),
+        is_completed=False,
+    )
+
+
+def _course_goal(course_id: int) -> CourseGoalDto:
+    return CourseGoalDto(course_id=course_id, course_name="Lineare Algebra")
+
+
 class FakeStudyLifeClient:
-    def __init__(self, notes: list[StudyLifeNote]) -> None:
-        self._notes = notes
+    def __init__(
+        self,
+        notes: list[StudyLifeNote] | None = None,
+        courses: list[CourseDto] | None = None,
+        sessions: list[StudySessionDto] | None = None,
+        course_goals: list[CourseGoalDto] | None = None,
+    ) -> None:
+        self._notes = notes or []
+        self._courses = courses or []
+        self._sessions = sessions or []
+        self._course_goals = course_goals or []
 
     async def get_notes(self) -> list[StudyLifeNote]:
         return self._notes
+
+    async def get_courses(self) -> list[CourseDto]:
+        return self._courses
+
+    async def get_sessions_history(
+        self, *, days: int, only_completed: bool
+    ) -> list[StudySessionDto]:
+        return self._sessions
+
+    async def get_course_goals(self) -> list[CourseGoalDto]:
+        return self._course_goals
 
     async def __aenter__(self) -> "FakeStudyLifeClient":
         return self
@@ -50,14 +91,14 @@ class FakeStudyLifeClient:
 
 
 class FakeQdrantStore:
-    def __init__(self, known: dict[int, str]) -> None:
+    def __init__(self, known: dict[tuple[str, int], str]) -> None:
         self._known = known
         self.ensure_collection = AsyncMock()
-        self.replace_note = AsyncMock()
-        self.delete_note = AsyncMock()
+        self.replace_entity = AsyncMock()
+        self.delete_entity = AsyncMock()
         self.close = AsyncMock()
 
-    async def get_known_fingerprints(self) -> dict[int, str]:
+    async def get_known_fingerprints(self) -> dict[tuple[str, int], str]:
         return self._known
 
 
@@ -65,14 +106,12 @@ async def test_sync_notes_raises_without_studylife_config() -> None:
     settings = _settings(studylife_api_base_url=None)
 
     with pytest.raises(RuntimeError):
-        await sync_module.sync_notes(settings)
+        await sync_module.sync_all(settings)
 
 
-async def test_sync_notes_ingests_new_note(monkeypatch: MonkeyPatch) -> None:
-    note = _note(1, "Linear Algebra", "Eigenvalues are important.")
-    fake_client = FakeStudyLifeClient([note])
-    fake_store = FakeQdrantStore(known={})
-
+async def _run_sync_all(
+    monkeypatch: MonkeyPatch, fake_client: FakeStudyLifeClient, fake_store: FakeQdrantStore
+) -> None:
     async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
@@ -80,50 +119,130 @@ async def test_sync_notes_ingests_new_note(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
     monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
 
-    await sync_module.sync_notes(_settings())
+    await sync_module.sync_all(_settings())
+
+
+async def test_sync_ingests_new_note(monkeypatch: MonkeyPatch) -> None:
+    note = _note(1, "Linear Algebra", "Eigenvalues are important.")
+    fake_client = FakeStudyLifeClient(notes=[note])
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
 
     fake_store.ensure_collection.assert_awaited_once_with(vector_size=2)
-    fake_store.replace_note.assert_awaited_once()
-    _, kwargs = fake_store.replace_note.call_args
-    assert kwargs["metadata"].note_id == 1
+    fake_store.replace_entity.assert_awaited_once()
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].content_type == "note"
+    assert kwargs["metadata"].entity_id == 1
     assert kwargs["chunks"] == ["Eigenvalues are important."]
-    fake_store.delete_note.assert_not_awaited()
+    fake_store.delete_entity.assert_not_awaited()
     fake_store.close.assert_awaited_once()
 
 
-async def test_sync_notes_skips_unchanged_note(monkeypatch: MonkeyPatch) -> None:
+async def test_sync_skips_unchanged_note(monkeypatch: MonkeyPatch) -> None:
     note = _note(1, "Linear Algebra", "Eigenvalues are important.")
-    fake_client = FakeStudyLifeClient([note])
-    fake_store = FakeQdrantStore(known={1: sync_module.fingerprint_note(note)})
-    embed_calls: list[list[str]] = []
+    fake_client = FakeStudyLifeClient(notes=[note])
+    fake_store = FakeQdrantStore(known={("note", 1): sync_module.fingerprint_note(note)})
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
-        embed_calls.append(texts)
-        return [[0.1] for _ in texts]
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
 
-    monkeypatch.setattr(sync_module, "StudyLifeClient", lambda **kwargs: fake_client)
-    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
-    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
-
-    await sync_module.sync_notes(_settings())
-
-    assert embed_calls == []
-    fake_store.replace_note.assert_not_awaited()
-    fake_store.delete_note.assert_not_awaited()
+    fake_store.replace_entity.assert_not_awaited()
+    fake_store.delete_entity.assert_not_awaited()
 
 
-async def test_sync_notes_deletes_notes_no_longer_present(monkeypatch: MonkeyPatch) -> None:
-    fake_client = FakeStudyLifeClient([])
-    fake_store = FakeQdrantStore(known={99: "stale-fingerprint"})
+async def test_sync_deletes_notes_no_longer_present(monkeypatch: MonkeyPatch) -> None:
+    fake_client = FakeStudyLifeClient(notes=[])
+    fake_store = FakeQdrantStore(known={("note", 99): "stale-fingerprint"})
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
-        return [[0.1] for _ in texts]
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
 
-    monkeypatch.setattr(sync_module, "StudyLifeClient", lambda **kwargs: fake_client)
-    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
-    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    fake_store.delete_entity.assert_awaited_once_with(content_type="note", entity_id=99)
+    fake_store.replace_entity.assert_not_awaited()
 
-    await sync_module.sync_notes(_settings())
 
-    fake_store.delete_note.assert_awaited_once_with(99)
-    fake_store.replace_note.assert_not_awaited()
+async def test_sync_ingests_new_course(monkeypatch: MonkeyPatch) -> None:
+    course = _course(6, "Lineare Algebra")
+    fake_client = FakeStudyLifeClient(courses=[course])
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.replace_entity.assert_awaited_once()
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].content_type == "course"
+    assert kwargs["metadata"].entity_id == 6
+    assert kwargs["metadata"].course_id is None
+
+
+async def test_sync_ingests_new_session(monkeypatch: MonkeyPatch) -> None:
+    session = _session(42, course_id=6)
+    fake_client = FakeStudyLifeClient(sessions=[session])
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.replace_entity.assert_awaited_once()
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].content_type == "session"
+    assert kwargs["metadata"].entity_id == 42
+    assert kwargs["metadata"].course_id == 6
+
+
+async def test_sync_ingests_new_course_goal_keyed_by_course_id(monkeypatch: MonkeyPatch) -> None:
+    goal = _course_goal(course_id=6)
+    fake_client = FakeStudyLifeClient(course_goals=[goal])
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.replace_entity.assert_awaited_once()
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].content_type == "course_goal"
+    assert kwargs["metadata"].entity_id == 6
+
+
+async def test_sync_deletes_course_goal_when_its_course_disappears(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    fake_client = FakeStudyLifeClient(course_goals=[])
+    fake_store = FakeQdrantStore(known={("course_goal", 6): "stale"})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.delete_entity.assert_awaited_once_with(content_type="course_goal", entity_id=6)
+
+
+async def test_sync_does_not_confuse_a_note_and_a_course_sharing_the_same_id(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A note and a course can both have numeric id=5 - the cross-type collision
+    regression test: only the note changed, the course must be left untouched."""
+    note = _note(5, "Linear Algebra", "New content.")
+    course = _course(5, "Lineare Algebra")
+    fake_client = FakeStudyLifeClient(notes=[note], courses=[course])
+    fake_store = FakeQdrantStore(
+        known={
+            ("note", 5): "stale-note-fingerprint",
+            ("course", 5): sync_module.fingerprint_course(course),
+        }
+    )
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    assert fake_store.replace_entity.await_count == 1
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["metadata"].content_type == "note"
+    fake_store.delete_entity.assert_not_awaited()
+
+
+async def test_sync_all_closes_store_once_even_with_empty_entity_lists(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    fake_client = FakeStudyLifeClient()
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.close.assert_awaited_once()
+    fake_store.replace_entity.assert_not_awaited()
+    fake_store.delete_entity.assert_not_awaited()

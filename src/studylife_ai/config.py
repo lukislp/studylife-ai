@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # stored on every Qdrant chunk so a future multi-user setup doesn't need
     # to re-ingest everything to add user scoping.
     studylife_user_id: str = "primary"
+    # Lookback window for GET /api/sessions/history (see docs/decisions.md
+    # "Ingestion scope expansion"). ~5 years, measured from "now" every sync
+    # run - it IS a rolling window: a session older than this eventually
+    # falls out of it and gets deleted from the Qdrant index (indistinguishable
+    # from a session that was actually deleted in StudyLife), not just
+    # excluded from a one-time fetch. Acceptable for a personal RAG index
+    # (5-year-old sessions have little retrieval value anyway), but worth
+    # knowing before ever lowering this value, which purges the difference
+    # immediately. Not a real deployment knob otherwise (onlyCompleted stays
+    # hardcoded False in sync.py), but config-driven like every other
+    # pipeline tunable here for consistency and testability.
+    studylife_session_history_days: int = 1825
 
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.
