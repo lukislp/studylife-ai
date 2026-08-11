@@ -16,6 +16,10 @@ services:
       # --build`/recreate — defeating the whole point of a persistent
       # checkpointer (see docs/decisions.md "M4 agent stack").
       AGENT_CHECKPOINT_DB_PATH: /app/data/agent_checkpoints.db
+      # M4.5: same reasoning - the per-user AiApiKey registry must survive
+      # container recreates, or every registered user would need to
+      # re-generate their key after every deploy.
+      REGISTERED_KEYS_DB_PATH: /app/data/registered_keys.db
     volumes:
       - agent_data:/app/data
     depends_on:

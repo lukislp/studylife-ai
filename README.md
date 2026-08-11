@@ -15,7 +15,7 @@ This is a learning project and portfolio piece; design decisions and trade-offs 
 
 ## Status: M4.5 (Multi-user) in progress
 
-M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is in progress: `studylife-ai`'s own side (per-request identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership) is implemented; the StudyLife-side backend proxy endpoint that forwards a logged-in user's own `AiApiKey` (see [docs/decisions.md](docs/decisions.md)) is not yet built. See [Roadmap](#roadmap).
+M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 with source citations, see [Ingestion](#ingestion)), and M3 (RAGAS eval in CI, see [Evaluation](#evaluation)) are done. M4 is done: a LangGraph agent can create study sessions and summarize+save notes via `POST /agent`, with every write gated behind an explicit confirmation step (`POST /agent/confirm`) — see [Agent](#agent). M4.5 (multi-user support) is in progress: identity is a short-lived, HMAC-signed proxy token minted by StudyLife's backend (not the long-lived `AiApiKey` - StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded), per-user Qdrant partitioning, multi-user ingestion, and a `RegisteredKeyStore` that StudyLife's backend populates automatically when a user generates their `AiApiKey` are all implemented on the `studylife-ai` side; the StudyLife-side backend proxy endpoint and registration wiring (a separate-repo change) is next — see [docs/decisions.md](docs/decisions.md).
 
 ## Architecture
 
@@ -50,7 +50,7 @@ flowchart LR
     FastAPI -. retrieval, M2 .-> Qdrant
 ```
 
-Dotted edges are not built yet (see roadmap). Not yet reflected here: M4.5 decided that `BlazorUI` will call a new StudyLife-backend proxy endpoint instead of `FastAPI` directly, so the backend can attach a logged-in user's own `AiApiKey` server-side — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support".
+Dotted edges are not built yet (see roadmap). Not yet reflected here: M4.5 decided that `BlazorUI` will call a new StudyLife-backend proxy endpoint instead of `FastAPI` directly, so the backend can sign a short-lived proxy token identifying the logged-in user, without ever needing their `AiApiKey` (which it can't retrieve - see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support").
 
 ## Quickstart
 
@@ -99,8 +99,9 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `LLM_API_BASE`                 | `http://localhost:11434`  | Base URL for self-hosted model backends (e.g. Ollama). Unused for most API providers. |
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
-| `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. One shared instance for all users. Required for ingestion, `/chat`, and `/agent`. |
-| `INGESTION_USERS`              | `[]`                      | JSON list of `{"user_id": ..., "ai_api_key": ...}` — one entry per StudyLife account the ingestion worker syncs, each into its own Qdrant partition. `/chat`/`/agent` get identity from per-request headers instead — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". |
+| `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. One shared instance for all users. Required for ingestion and `/agent` (not `/chat`, which never calls StudyLife's API). |
+| `STUDYLIFE_SHARED_SECRET`      | _(unset)_                 | Shared secret StudyLife signs per-request proxy tokens with — must match StudyLife's own config exactly. Also authenticates `POST /internal/register-key`/`revoke-key`. See [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". |
+| `REGISTERED_KEYS_DB_PATH`      | `registered_keys.db`      | SQLite file mapping `user_id` → real `AiApiKey`, populated automatically by StudyLife's registration callback — not set manually. Used by `/agent` and ingestion. |
 | `STUDYLIFE_SESSION_HISTORY_DAYS` | `1825`                  | Lookback window (in days, from "now") for ingesting study sessions. Rolling, not a fixed boundary — a session older than this is dropped from the index on the next sync — see [docs/decisions.md](docs/decisions.md). |
 | `EMBEDDING_MODEL`              | `ollama/nomic-embed-text` | LiteLLM embedding model identifier, same provider convention as `LLM_MODEL`. |
 | `QDRANT_URL`                   | `http://localhost:6333`  | Qdrant connection URL.                                                      |
@@ -111,20 +112,21 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `RERANK_CANDIDATE_K`           | `20`                      | Target candidate pool size, split evenly across the 4 content types (note/course/session/course_goal) — always applied, independent of `RERANK_MODEL`. See [docs/decisions.md](docs/decisions.md). |
 | `RERANK_MODEL`                 | _(unset)_                 | LiteLLM model identifier for optional LLM-based reranking of the candidate pool, independent of `LLM_MODEL`. Unset = candidate pool is just sorted by vector-similarity score. See [docs/decisions.md](docs/decisions.md). |
 | `EVAL_JUDGE_MODEL`             | _(unset)_                 | LiteLLM model identifier for the RAGAS eval judge, deliberately independent of `LLM_MODEL` — see [Evaluation](#evaluation). Required to run `python -m studylife_ai.eval`. |
-| `EVAL_USER_ID`                 | `eval-user`               | Fixed Qdrant partition the eval pipeline reads/writes under, decoupled from any real `INGESTION_USERS` entry. |
+| `EVAL_USER_ID`                 | `eval-user`               | Fixed Qdrant partition the eval pipeline reads/writes under, decoupled from any real registered user. |
 | `AGENT_CHECKPOINT_DB_PATH`     | `agent_checkpoints.db`    | SQLite file storing paused agent state between a proposed write action and its confirmation — survives a service restart. See [Agent](#agent). |
 
 ## API
 
-`POST /chat` and `POST /agent`/`POST /agent/confirm` require two identity headers, forwarded by StudyLife's own backend on behalf of an already-logged-in user (not by this app or its caller directly — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support"): `X-StudyLife-User-Id` (the real StudyLife-internal user id) and `X-StudyLife-Ai-Key` (that user's own `AiApiKey`). Missing either returns `401`. `X-StudyLife-Ai-Key` is also verified against StudyLife on every request (one real `GET /api/courses` call, discarded) as defense in depth beyond network isolation — an invalid/revoked key returns `401`; this also means `STUDYLIFE_API_BASE_URL` is now required for `/chat` too (see [docs/decisions.md](docs/decisions.md) "Key validity check").
+`POST /chat` and `POST /agent`/`POST /agent/confirm` require a single `X-StudyLife-Proxy-Token` header: a short-lived, HMAC-signed `{user_id}.{expiry}.{signature}` token, minted by StudyLife's own backend on behalf of an already-logged-in user (not by this app or its caller directly), verified entirely locally against `STUDYLIFE_SHARED_SECRET` (no network round-trip). Missing/malformed/wrongly-signed/expired tokens return `401`. It is *not* the user's `AiApiKey` — StudyLife only ever stores a hash of that, never the plaintext, so it can't be forwarded (see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support"). `/agent` separately looks up that user's real `AiApiKey` from `REGISTERED_KEYS_DB_PATH` to make actual StudyLife API calls — `404` if none is registered yet.
 
 - `GET /health` — liveness check.
 - `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks, scoped to the calling user's own Qdrant partition: an even candidate quota is fetched from each content type (notes, courses, sessions, course goals), merged, optionally reranked by an LLM (`RERANK_MODEL`), then cut down to `RETRIEVAL_TOP_K` and injected as a system message ahead of the conversation (see [Retrieval quality](docs/decisions.md)). Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
 - `POST /agent` / `POST /agent/confirm` — tool-calling with confirmed writes, see [Agent](#agent).
+- `POST /internal/register-key` / `POST /internal/revoke-key` — not part of the public chat/agent surface; called only by StudyLife's backend (see [docs/decisions.md](docs/decisions.md)) to keep `REGISTERED_KEYS_DB_PATH` in sync with a user's real `AiApiKey`. Authenticated by comparing `X-StudyLife-Shared-Secret` against `STUDYLIFE_SHARED_SECRET`.
 
 ## Ingestion
 
-Syncs StudyLife notes, courses, study sessions (calendar), and course goals into one Qdrant collection: fetches all entities of each type, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. A `content_type` field on every point disambiguates types that can share numeric ids (e.g. course id=5 and note id=5); a `user_id` field disambiguates different StudyLife accounts the same way. Requires `STUDYLIFE_API_BASE_URL` and at least one entry in `INGESTION_USERS` to be set - syncs every configured account, one after another, each into its own Qdrant partition.
+Syncs StudyLife notes, courses, study sessions (calendar), and course goals into one Qdrant collection: fetches all entities of each type, diffs them against what's already stored (by content hash, not a StudyLife-side timestamp — see [docs/decisions.md](docs/decisions.md)), then chunks, embeds, and upserts what's new or changed, and removes what's gone. A `content_type` field on every point disambiguates types that can share numeric ids (e.g. course id=5 and note id=5); a `user_id` field disambiguates different StudyLife accounts the same way. Requires `STUDYLIFE_API_BASE_URL` and at least one user registered in `REGISTERED_KEYS_DB_PATH` — syncs every registered account, one after another, each into its own Qdrant partition. A single account's failure (revoked key, StudyLife-side error) is logged and skipped rather than aborting the run for everyone else.
 
 ```bash
 # via docker compose (uses the running app container's environment)
@@ -148,20 +150,18 @@ No write ever executes directly. `POST /agent` either answers directly or return
 ```bash
 curl -X POST http://localhost:8000/agent \
   -H "Content-Type: application/json" \
-  -H "X-StudyLife-User-Id: 1" \
-  -H "X-StudyLife-Ai-Key: <that user's own AiApiKey>" \
+  -H "X-StudyLife-Proxy-Token: 1.1755001234.<signature>" \
   -d '{"message": "Leg mir für morgen um 14 Uhr eine 60-minütige Session für Lineare Algebra an."}'
 # -> {"answer": null, "pending_actions": [{"tool": "create_study_session", "args": {...}, "thread_id": "1:..."}]}
 
 curl -X POST http://localhost:8000/agent/confirm \
   -H "Content-Type: application/json" \
-  -H "X-StudyLife-User-Id: 1" \
-  -H "X-StudyLife-Ai-Key: <that user's own AiApiKey>" \
+  -H "X-StudyLife-Proxy-Token: 1.1755001234.<signature>" \
   -d '{"thread_id": "1:...", "decision": "approve"}'
 # -> {"answer": "...", "pending_actions": []}
 ```
 
-`thread_id` embeds the proposing user's id (`f"{user_id}:{uuid4()}"`) - `POST /agent/confirm` rejects with `403` if the caller's own resolved id doesn't match, before the checkpointer is ever touched (see [docs/decisions.md](docs/decisions.md)). Both endpoints require `STUDYLIFE_API_BASE_URL` to be set and return `503` otherwise; missing identity headers return `401`.
+`thread_id` embeds the proposing user's id (`f"{user_id}:{uuid4()}"`) - `POST /agent/confirm` rejects with `403` if the caller's own resolved id doesn't match, before the checkpointer (or even a `StudyLifeClient`) is ever touched (see [docs/decisions.md](docs/decisions.md)). Both endpoints require `STUDYLIFE_API_BASE_URL` to be set (`503` otherwise) and a registered `AiApiKey` for the calling user (`404` otherwise, see [Ingestion](#ingestion)); an invalid/expired proxy token returns `401`.
 
 ## Evaluation
 
@@ -188,7 +188,7 @@ No CI thresholds are set yet (see [docs/decisions.md](docs/decisions.md) "M3 eva
 - [x] **M2** — Ingestion pipeline + Qdrant + RAG v1 with source citations.
 - [x] **M3** — Eval set + RAGAS in CI, baseline metrics.
 - [x] **M4** — LangGraph agent + tools against the StudyLife API, confirmation flow for write actions.
-- [ ] **M4.5** — Multi-user support: per-user Qdrant partitioning, multi-user ingestion, per-request agent identity, per-user agent thread ownership - done on the `studylife-ai` side. Still open: the StudyLife-backend proxy endpoint that forwards a logged-in user's own `AiApiKey` (a separate-repo change) — see [docs/decisions.md](docs/decisions.md).
+- [ ] **M4.5** — Multi-user support: signed proxy-token identity, per-user Qdrant partitioning, multi-user ingestion, per-user agent thread ownership, a `RegisteredKeyStore` for real per-user `AiApiKey`s - done on the `studylife-ai` side. Still open: the StudyLife-side backend proxy endpoint and registration wiring (a separate-repo change) — see [docs/decisions.md](docs/decisions.md).
 - [ ] **M5** — k3s deployment, rate limiting, cost/latency logging, Ollama option.
 - [ ] **M6** — Documentation polish, architecture diagram, demo material.
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
