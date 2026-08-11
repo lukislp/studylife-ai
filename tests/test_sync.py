@@ -131,7 +131,9 @@ async def test_sync_raises_without_any_registered_users(monkeypatch: MonkeyPatch
 async def _run_sync_all(
     monkeypatch: MonkeyPatch, fake_client: FakeStudyLifeClient, fake_store: FakeQdrantStore
 ) -> None:
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
     monkeypatch.setattr(sync_module, "StudyLifeClient", lambda **kwargs: fake_client)
@@ -303,7 +305,9 @@ async def test_sync_all_syncs_every_registered_user_with_their_own_key(
 
     fake_store = FakeQdrantStore(known={})
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
     monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
@@ -332,7 +336,9 @@ async def test_sync_all_continues_with_other_users_after_one_fails(
 
     fake_store = FakeQdrantStore(known={})
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
     monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)

@@ -89,6 +89,7 @@ async def rerank_chunks(
             model=model,
             api_base=api_base,
             timeout=timeout,
+            call_site="rerank",
         )
     except Exception:
         logger.exception("Reranking failed, falling back to vector-search order")

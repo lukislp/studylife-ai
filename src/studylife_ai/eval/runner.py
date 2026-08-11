@@ -74,6 +74,7 @@ async def _generate_answer(
             model=settings.llm_model,
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
+            call_site="eval",
         )
     ]
     return "".join(deltas), chunks
@@ -95,20 +96,28 @@ class _JudgeEmbeddings(BaseRagasEmbeddings):
         self._model = model
 
     def embed_query(self, text: str) -> list[float]:
-        response = litellm.embedding(model=self._model, input=[text])
+        response = litellm.embedding(
+            model=self._model, input=[text], metadata={"call_site": "eval-judge"}
+        )
         return list(response.data[0]["embedding"])
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        response = litellm.embedding(model=self._model, input=texts)
+        response = litellm.embedding(
+            model=self._model, input=texts, metadata={"call_site": "eval-judge"}
+        )
         ordered = sorted(response.data, key=lambda item: item["index"])
         return [item["embedding"] for item in ordered]
 
     async def aembed_query(self, text: str) -> list[float]:
-        response = await litellm.aembedding(model=self._model, input=[text])
+        response = await litellm.aembedding(
+            model=self._model, input=[text], metadata={"call_site": "eval-judge"}
+        )
         return list(response.data[0]["embedding"])
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        response = await litellm.aembedding(model=self._model, input=texts)
+        response = await litellm.aembedding(
+            model=self._model, input=texts, metadata={"call_site": "eval-judge"}
+        )
         ordered = sorted(response.data, key=lambda item: item["index"])
         return [item["embedding"] for item in ordered]
 
@@ -131,7 +140,12 @@ def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, BaseRagasEmbeddings]
     # timeout (see docs/decisions.md). A degraded-but-present score (n=1) beats
     # a reliably-NaN one (timed out at n=3), especially with no CI thresholds
     # depending on the exact value yet.
-    judge_llm = LangchainLLMWrapper(ChatLiteLLM(model=settings.eval_judge_model))
+    judge_llm = LangchainLLMWrapper(
+        ChatLiteLLM(
+            model=settings.eval_judge_model,
+            model_kwargs={"metadata": {"call_site": "eval-judge"}},
+        )
+    )
     judge_embeddings = _JudgeEmbeddings(model=settings.embedding_model)
     return judge_llm, judge_embeddings
 

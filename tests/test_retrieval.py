@@ -42,7 +42,9 @@ async def test_retrieve_with_rerank_fetches_an_even_quota_per_content_type(
         assert kwargs["top_k"] == 5  # rerank_candidate_k=20 // 4 types
         return []
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2]]
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
@@ -69,7 +71,9 @@ async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
         return per_type_results[kwargs["content_type"]]
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2]]
 
     async def fake_rerank_chunks(*args: object, **kwargs: object) -> list[RetrievedChunk]:
@@ -97,7 +101,9 @@ async def test_retrieve_with_rerank_reranks_merged_pool_when_model_set(
     async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
         return [candidates.pop(0)] if candidates else []
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2]]
 
     async def fake_rerank_chunks(
@@ -128,7 +134,9 @@ async def test_retrieve_with_rerank_with_explicit_content_type_skips_per_type_sp
         captured.update(kwargs)
         return [_chunk_of_type(1, "note-1", "note", 0.9)]
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2]]
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
@@ -150,7 +158,9 @@ async def test_retrieve_with_rerank_with_explicit_content_type_skips_per_type_sp
 async def test_retrieve_with_rerank_returns_empty_when_embedding_fails(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return []
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
@@ -176,7 +186,9 @@ async def test_a_single_content_types_search_failure_does_not_abort_the_others(
 
     store.search = AsyncMock(side_effect=fake_search)  # type: ignore[method-assign]
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         return [[0.1, 0.2]]
 
     monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)

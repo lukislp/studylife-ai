@@ -104,7 +104,11 @@ async def _sync_content_type[T](
             chunk_size_tokens=settings.chunk_size_tokens,
             overlap_tokens=settings.chunk_overlap_tokens,
         )
-        vectors = await embed_texts(chunks, model=settings.embedding_model) if chunks else []
+        vectors = (
+            await embed_texts(chunks, model=settings.embedding_model, call_site="ingestion")
+            if chunks
+            else []
+        )
         if vectors:
             await store.ensure_collection(vector_size=len(vectors[0]))
         await store.replace_entity(

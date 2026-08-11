@@ -10,6 +10,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from studylife_ai.api import agent, chat, health, internal
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
+from studylife_ai.llm.logging import configure_llm_usage_logging
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 
@@ -48,6 +49,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
+    configure_llm_usage_logging()
 
     app = FastAPI(title=settings.app_name, lifespan=_lifespan)
     app.include_router(health.router)

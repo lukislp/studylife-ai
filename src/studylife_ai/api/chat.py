@@ -78,6 +78,7 @@ async def _sse_event_stream(
             model=model,
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
+            call_site="chat",
         ):
             yield f"data: {json.dumps({'delta': delta})}\n\n"
     except Exception:

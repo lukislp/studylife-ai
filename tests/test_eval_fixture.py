@@ -45,7 +45,9 @@ async def test_seed_fixture_notes_chunks_embeds_and_upserts_each_note(
     notes = [FixtureNote(id=1, title="Eigenwerte", content="det(A - λI) = 0", course_id=6)]
     store = FakeQdrantStore()
 
-    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
         assert model == "openai/text-embedding-3-small"
         return [[0.1, 0.2] for _ in texts]
 

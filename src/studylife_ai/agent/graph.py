@@ -23,7 +23,11 @@ _WRITE_TOOLS = {"create_study_session", "save_note"}
 def build_agent(
     *, tools: list[BaseTool], checkpointer: BaseCheckpointSaver[Any], settings: Settings
 ) -> Any:
-    model = ChatLiteLLM(model=settings.llm_model, api_base=settings.llm_api_base)
+    model = ChatLiteLLM(
+        model=settings.llm_model,
+        api_base=settings.llm_api_base,
+        model_kwargs={"metadata": {"call_site": "agent"}},
+    )
     return create_agent(
         model=model,
         tools=tools,

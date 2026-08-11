@@ -6,7 +6,7 @@ from studylife_ai.llm.embeddings import embed_texts
 
 
 async def test_embed_texts_returns_vectors_in_input_order(monkeypatch: MonkeyPatch) -> None:
-    async def fake_aembedding(*, model: str, input: list[str]) -> object:
+    async def fake_aembedding(*, model: str, input: list[str], **_kwargs: object) -> object:
         assert model == "ollama/nomic-embed-text"
         # Return out of order to verify embed_texts re-sorts by index.
         return SimpleNamespace(

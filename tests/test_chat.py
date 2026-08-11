@@ -38,7 +38,10 @@ def _mock_no_retrieval(monkeypatch: MonkeyPatch) -> None:
 async def test_chat_streams_llm_deltas_and_sources_as_sse(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
-    async def fake_acompletion(*_args: object, **_kwargs: object) -> object:
+    calls = []
+
+    async def fake_acompletion(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
         return _make_fake_stream(["Hello", ", world!"])
 
     monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
@@ -50,6 +53,10 @@ async def test_chat_streams_llm_deltas_and_sources_as_sse(
     events = _parse_sse_events(response.text)
     assert events == [{"delta": "Hello"}, {"delta": ", world!"}, {"sources": []}]
     assert response.text.strip().endswith("data: [DONE]")
+    # M5: cost/latency logging (llm/logging.py) reads the call site from
+    # this metadata - a regression here would silently break call-site
+    # tagging without failing any logging test on its own.
+    assert calls[0]["metadata"] == {"call_site": "chat"}
 
 
 async def test_chat_streams_error_event_on_llm_failure(

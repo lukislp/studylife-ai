@@ -7,6 +7,7 @@ from studylife_ai.config import get_settings
 from studylife_ai.eval.dataset import load_eval_cases
 from studylife_ai.eval.runner import run_eval
 from studylife_ai.ingestion.qdrant_store import QdrantStore
+from studylife_ai.llm.logging import configure_llm_usage_logging
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 async def _main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
+    configure_llm_usage_logging()
 
     cases = load_eval_cases()
     store = QdrantStore(url=settings.qdrant_url, collection=settings.qdrant_collection)
