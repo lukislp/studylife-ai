@@ -8,8 +8,10 @@ the first real embedding call.
 
 Notes, courses, sessions, and course goals all share one collection,
 disambiguated by `content_type` (see docs/decisions.md "Ingestion scope
-expansion"). `content_type` + `entity_id` together are an entity's real
-identity — a course and a note can both have id=5 without colliding.
+expansion"). `user_id` + `content_type` + `entity_id` together are an
+entity's real identity — a course and a note can both have id=5 without
+colliding, and so can two different users' entities (see docs/decisions.md
+"M4.5 Multi-user support" — StudyLife ids are per-account, not global).
 """
 
 import uuid
@@ -44,6 +46,10 @@ class RetrievedChunk:
     score: float
 
 
+def _user_id_condition(user_id: str) -> models.FieldCondition:
+    return models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+
+
 class QdrantStore:
     def __init__(self, *, url: str, collection: str) -> None:
         # check_compatibility=False: skip the server-version handshake on
@@ -63,11 +69,15 @@ class QdrantStore:
             vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
         )
 
-    async def get_known_fingerprints(self) -> dict[tuple[str, int], str]:
-        """Last known fingerprint per (content_type, entity_id), derived from stored chunks.
+    async def get_known_fingerprints(self, *, user_id: str) -> dict[tuple[str, int], str]:
+        """Last known fingerprint per (content_type, entity_id), scoped to one user.
 
         All chunks of an entity share the same fingerprint, so the last one
         seen per (content_type, entity_id) while scrolling is sufficient.
+        Scoped by `user_id` - without it, two users' entities that happen to
+        share a (content_type, entity_id) pair (e.g. both have a note with
+        id=5, since StudyLife ids are per-account) would collide, corrupting
+        the diff for both.
         """
         if not await self.collection_exists():
             return {}
@@ -77,6 +87,7 @@ class QdrantStore:
         while True:
             points, offset = await self._client.scroll(
                 collection_name=self._collection,
+                scroll_filter=models.Filter(must=[_user_id_condition(user_id)]),
                 with_payload=["content_type", "entity_id", "fingerprint"],
                 with_vectors=False,
                 limit=256,
@@ -97,7 +108,11 @@ class QdrantStore:
         metadata: EntityChunkMetadata,
     ) -> None:
         """Replace all chunks of an entity: delete whatever exists, insert the given chunks."""
-        await self.delete_entity(content_type=metadata.content_type, entity_id=metadata.entity_id)
+        await self.delete_entity(
+            user_id=metadata.user_id,
+            content_type=metadata.content_type,
+            entity_id=metadata.entity_id,
+        )
         if not chunks:
             return
         points = [
@@ -140,9 +155,7 @@ class QdrantStore:
         """
         if not await self.collection_exists():
             return []
-        must: list[models.Condition] = [
-            models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
-        ]
+        must: list[models.Condition] = [_user_id_condition(user_id)]
         if content_type is not None:
             must.append(
                 models.FieldCondition(
@@ -171,12 +184,15 @@ class QdrantStore:
             if point.payload is not None
         ]
 
-    async def delete_entity(self, *, content_type: ContentType, entity_id: int) -> None:
+    async def delete_entity(
+        self, *, user_id: str, content_type: ContentType, entity_id: int
+    ) -> None:
         """No-op if the collection doesn't exist yet — nothing to delete.
 
-        Filters on both `content_type` and `entity_id` - a course and a note
-        can share a numeric id, so `entity_id` alone would risk deleting the
-        wrong entity.
+        Filters on `user_id`, `content_type`, AND `entity_id` - a course and
+        a note can share a numeric id, and two different users' entities can
+        too (StudyLife ids are per-account) - `content_type`+`entity_id`
+        alone would risk deleting the wrong entity, or another user's.
         """
         if not await self.collection_exists():
             return
@@ -185,6 +201,7 @@ class QdrantStore:
             points_selector=models.FilterSelector(
                 filter=models.Filter(
                     must=[
+                        _user_id_condition(user_id),
                         models.FieldCondition(
                             key="content_type", match=models.MatchValue(value=content_type)
                         ),

@@ -4,21 +4,22 @@ from unittest.mock import AsyncMock
 import pytest
 from pytest import MonkeyPatch
 
-from studylife_ai.config import Settings
+from studylife_ai.config import IngestionUser, Settings
 from studylife_ai.ingestion import sync as sync_module
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
+
+_TEST_USER = IngestionUser(user_id="primary", ai_api_key="secret")
 
 
 def _settings(**overrides: object) -> Settings:
     defaults: dict[str, object] = {
         "studylife_api_base_url": "http://studylife.test",
-        "studylife_api_key": "secret",
+        "ingestion_users": [_TEST_USER],
         "embedding_model": "ollama/nomic-embed-text",
         "chunk_size_tokens": 500,
         "chunk_overlap_tokens": 75,
         "qdrant_url": "http://qdrant.test:6333",
         "qdrant_collection": "studylife_notes",
-        "studylife_user_id": "primary",
         "studylife_session_history_days": 1825,
     }
     defaults.update(overrides)
@@ -98,14 +99,21 @@ class FakeQdrantStore:
         self.delete_entity = AsyncMock()
         self.close = AsyncMock()
 
-    async def get_known_fingerprints(self) -> dict[tuple[str, int], str]:
+    async def get_known_fingerprints(self, *, user_id: str) -> dict[tuple[str, int], str]:
         return self._known
 
 
-async def test_sync_notes_raises_without_studylife_config() -> None:
+async def test_sync_raises_without_studylife_base_url() -> None:
     settings = _settings(studylife_api_base_url=None)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="STUDYLIFE_API_BASE_URL"):
+        await sync_module.sync_all(settings)
+
+
+async def test_sync_raises_without_any_configured_ingestion_users() -> None:
+    settings = _settings(ingestion_users=[])
+
+    with pytest.raises(RuntimeError, match="INGESTION_USERS"):
         await sync_module.sync_all(settings)
 
 
@@ -156,7 +164,9 @@ async def test_sync_deletes_notes_no_longer_present(monkeypatch: MonkeyPatch) ->
 
     await _run_sync_all(monkeypatch, fake_client, fake_store)
 
-    fake_store.delete_entity.assert_awaited_once_with(content_type="note", entity_id=99)
+    fake_store.delete_entity.assert_awaited_once_with(
+        user_id="primary", content_type="note", entity_id=99
+    )
     fake_store.replace_entity.assert_not_awaited()
 
 
@@ -226,7 +236,9 @@ async def test_sync_deletes_course_goal_when_its_course_disappears(
 
     await _run_sync_all(monkeypatch, fake_client, fake_store)
 
-    fake_store.delete_entity.assert_awaited_once_with(content_type="course_goal", entity_id=6)
+    fake_store.delete_entity.assert_awaited_once_with(
+        user_id="primary", content_type="course_goal", entity_id=6
+    )
 
 
 async def test_sync_does_not_confuse_a_note_and_a_course_sharing_the_same_id(
@@ -263,3 +275,64 @@ async def test_sync_all_closes_store_once_even_with_empty_entity_lists(
     fake_store.close.assert_awaited_once()
     fake_store.replace_entity.assert_not_awaited()
     fake_store.delete_entity.assert_not_awaited()
+
+
+async def test_sync_all_syncs_every_configured_user_with_their_own_key(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Multi-user (see docs/decisions.md "M4.5 Multi-user support"):
+    sync_all() must build a separate StudyLifeClient per configured user,
+    using that user's own ai_api_key - never one shared credential."""
+    user_a = IngestionUser(user_id="alice", ai_api_key="key-a")
+    user_b = IngestionUser(user_id="bob", ai_api_key="key-b")
+    constructed_keys: list[object] = []
+
+    def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
+        constructed_keys.append(kwargs["api_key"])
+        return FakeStudyLifeClient()
+
+    fake_store = FakeQdrantStore(known={})
+
+    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+
+    await sync_module.sync_all(_settings(ingestion_users=[user_a, user_b]))
+
+    assert constructed_keys == ["key-a", "key-b"]
+    fake_store.close.assert_awaited_once()
+
+
+async def test_sync_all_continues_with_other_users_after_one_fails(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A revoked key or StudyLife-side error for one user must not starve
+    ingestion for every other configured user."""
+    user_a = IngestionUser(user_id="alice", ai_api_key="key-a")
+    user_b = IngestionUser(user_id="bob", ai_api_key="key-b")
+    synced_users: list[str] = []
+
+    def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
+        if kwargs["api_key"] == "key-a":
+            raise RuntimeError("401 Unauthorized")
+        synced_users.append(str(kwargs["api_key"]))
+        return FakeStudyLifeClient()
+
+    fake_store = FakeQdrantStore(known={})
+
+    async def fake_embed_texts(texts: list[str], *, model: str) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+
+    with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
+        await sync_module.sync_all(_settings(ingestion_users=[user_a, user_b]))
+
+    assert synced_users == ["key-b"]
+    assert any("failed for user_id=alice" in record.message for record in caplog.records)
+    fake_store.close.assert_awaited_once()

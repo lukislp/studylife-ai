@@ -35,7 +35,7 @@ async def test_get_known_fingerprints_returns_empty_when_collection_missing() ->
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=False)
 
-    assert await store.get_known_fingerprints() == {}
+    assert await store.get_known_fingerprints(user_id="primary") == {}
 
 
 async def test_get_known_fingerprints_paginates_and_dedupes_by_content_type_and_entity_id() -> None:
@@ -55,10 +55,14 @@ async def test_get_known_fingerprints_paginates_and_dedupes_by_content_type_and_
     )
     store._client.scroll = AsyncMock(side_effect=[page1, page2])
 
-    result = await store.get_known_fingerprints()
+    result = await store.get_known_fingerprints(user_id="primary")
 
     assert result == {("note", 1): "a", ("course", 1): "b"}
     assert store._client.scroll.await_count == 2
+    _, kwargs = store._client.scroll.call_args
+    condition = kwargs["scroll_filter"].must[0]
+    assert condition.key == "user_id"
+    assert condition.match.value == "primary"
 
 
 async def test_replace_entity_deletes_existing_then_upserts_new_chunks() -> None:
@@ -114,18 +118,18 @@ async def test_replace_entity_with_no_chunks_only_deletes() -> None:
     store._client.upsert.assert_not_awaited()
 
 
-async def test_delete_entity_filters_by_content_type_and_entity_id() -> None:
+async def test_delete_entity_filters_by_user_id_content_type_and_entity_id() -> None:
     store = _make_store()
     store._client.collection_exists = AsyncMock(return_value=True)
     store._client.delete = AsyncMock()
 
-    await store.delete_entity(content_type="course", entity_id=42)
+    await store.delete_entity(user_id="primary", content_type="course", entity_id=42)
 
     store._client.delete.assert_awaited_once()
     _, kwargs = store._client.delete.call_args
     conditions = kwargs["points_selector"].filter.must
-    assert {c.key for c in conditions} == {"content_type", "entity_id"}
-    assert {c.match.value for c in conditions} == {"course", 42}
+    assert {c.key for c in conditions} == {"user_id", "content_type", "entity_id"}
+    assert {c.match.value for c in conditions} == {"primary", "course", 42}
 
 
 async def test_delete_entity_is_noop_when_collection_missing() -> None:
@@ -133,7 +137,7 @@ async def test_delete_entity_is_noop_when_collection_missing() -> None:
     store._client.collection_exists = AsyncMock(return_value=False)
     store._client.delete = AsyncMock()
 
-    await store.delete_entity(content_type="note", entity_id=42)
+    await store.delete_entity(user_id="primary", content_type="note", entity_id=42)
 
     store._client.delete.assert_not_awaited()
 

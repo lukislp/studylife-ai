@@ -1,4 +1,4 @@
-"""Orchestrates one ingestion sync run.
+"""Orchestrates one ingestion sync run, across all configured users.
 
 Full-list diff against Qdrant's own state (no separate manifest store —
 see docs/decisions.md "Incremental sync"): fetch all entities, compare each
@@ -6,7 +6,10 @@ against its last known fingerprint, chunk+embed+upsert what's new or
 changed, delete what's gone. Runs across all four content types (notes,
 courses, sessions, course goals — see docs/decisions.md "Ingestion scope
 expansion") through one shared helper, since the diff/chunk/embed/upsert/
-delete control flow is identical for all of them.
+delete control flow is identical for all of them. `sync_all()` then repeats
+this per StudyLife account configured in `settings.ingestion_users` (see
+docs/decisions.md "M4.5 Multi-user support"), each into its own Qdrant
+partition.
 """
 
 import asyncio
@@ -14,7 +17,7 @@ import hashlib
 import logging
 from collections.abc import Callable, Sequence
 
-from studylife_ai.config import Settings
+from studylife_ai.config import IngestionUser, Settings
 from studylife_ai.ingestion.chunking import chunk_text
 from studylife_ai.ingestion.qdrant_store import ContentType, EntityChunkMetadata, QdrantStore
 from studylife_ai.ingestion.rendering import (
@@ -59,6 +62,7 @@ async def _sync_content_type[T](
     *,
     store: QdrantStore,
     settings: Settings,
+    user_id: str,
     known: dict[tuple[str, int], str],
     entities: Sequence[T],
     content_type: ContentType,
@@ -110,97 +114,121 @@ async def _sync_content_type[T](
                 title=title(entity),
                 course_id=course_id(entity),
                 session_id=session_id(entity),
-                user_id=settings.studylife_user_id,
+                user_id=user_id,
                 fingerprint=fingerprint(entity),
             ),
         )
 
     for eid in deleted_ids:
-        await store.delete_entity(content_type=content_type, entity_id=eid)
+        await store.delete_entity(user_id=user_id, content_type=content_type, entity_id=eid)
+
+
+async def _sync_user(*, user: IngestionUser, settings: Settings, store: QdrantStore) -> None:
+    known = await store.get_known_fingerprints(user_id=user.user_id)
+
+    async with StudyLifeClient(
+        base_url=settings.studylife_api_base_url,  # type: ignore[arg-type]
+        api_key=user.ai_api_key,
+    ) as studylife:
+        # Four independent endpoints - fetch concurrently rather than
+        # paying each round-trip in series.
+        notes, courses, sessions, course_goals = await asyncio.gather(
+            studylife.get_notes(),
+            studylife.get_courses(),
+            studylife.get_sessions_history(
+                days=settings.studylife_session_history_days, only_completed=False
+            ),
+            studylife.get_course_goals(),
+        )
+
+    await _sync_content_type(
+        store=store,
+        settings=settings,
+        user_id=user.user_id,
+        known=known,
+        entities=notes,
+        content_type="note",
+        entity_id=lambda n: n.id,
+        fingerprint=fingerprint_note,
+        render_text=lambda n: n.content,
+        title=lambda n: n.title,
+        course_id=lambda n: n.course_id,
+        session_id=lambda n: n.session_id,
+    )
+
+    await _sync_content_type(
+        store=store,
+        settings=settings,
+        user_id=user.user_id,
+        known=known,
+        entities=courses,
+        content_type="course",
+        entity_id=lambda c: c.id,
+        fingerprint=fingerprint_course,
+        render_text=render_course,
+        title=lambda c: c.name,
+        course_id=lambda _c: None,
+        session_id=lambda _c: None,
+    )
+
+    await _sync_content_type(
+        store=store,
+        settings=settings,
+        user_id=user.user_id,
+        known=known,
+        entities=sessions,
+        content_type="session",
+        entity_id=lambda s: s.id,
+        fingerprint=fingerprint_session,
+        render_text=render_session,
+        title=lambda s: f"{s.course_name}, {s.start_time.strftime(DATETIME_FORMAT)}",
+        course_id=lambda s: s.course_id,
+        session_id=lambda _s: None,
+    )
+
+    # CourseGoalDto has no own id - course_id is its natural unique key
+    # (the API only ever returns one goal per course). If that ever
+    # changes, this silently keeps only the last-diffed goal per course.
+    await _sync_content_type(
+        store=store,
+        settings=settings,
+        user_id=user.user_id,
+        known=known,
+        entities=course_goals,
+        content_type="course_goal",
+        entity_id=lambda g: g.course_id,
+        fingerprint=fingerprint_course_goal,
+        render_text=render_course_goal,
+        title=lambda g: f"{g.course_name} goal",
+        course_id=lambda g: g.course_id,
+        session_id=lambda _g: None,
+    )
 
 
 async def sync_all(settings: Settings) -> None:
-    if not settings.studylife_api_base_url or not settings.studylife_api_key:
-        raise RuntimeError(
-            "STUDYLIFE_API_BASE_URL and STUDYLIFE_API_KEY must be set to run ingestion."
-        )
+    """Syncs every configured StudyLife account (see docs/decisions.md
+    "M4.5 Multi-user support") into its own Qdrant partition, one after
+    another - not concurrently, since each user's own four-endpoint fetch is
+    already the parallel unit of work, and running multiple users at once
+    would multiply StudyLife API load for no benefit at ingestion's scale.
+
+    One user's failure (e.g. a revoked ai_api_key, a StudyLife-side error) is
+    logged and skipped rather than aborting the whole run - otherwise a
+    single broken account would silently starve ingestion for every other
+    configured user until fixed.
+    """
+    if not settings.studylife_api_base_url:
+        raise RuntimeError("STUDYLIFE_API_BASE_URL must be set to run ingestion.")
+    if not settings.ingestion_users:
+        raise RuntimeError("INGESTION_USERS must configure at least one user to run ingestion.")
 
     store = QdrantStore(url=settings.qdrant_url, collection=settings.qdrant_collection)
     try:
-        known = await store.get_known_fingerprints()
-
-        async with StudyLifeClient(
-            base_url=settings.studylife_api_base_url,
-            api_key=settings.studylife_api_key,
-        ) as studylife:
-            # Four independent endpoints - fetch concurrently rather than
-            # paying each round-trip in series.
-            notes, courses, sessions, course_goals = await asyncio.gather(
-                studylife.get_notes(),
-                studylife.get_courses(),
-                studylife.get_sessions_history(
-                    days=settings.studylife_session_history_days, only_completed=False
-                ),
-                studylife.get_course_goals(),
-            )
-
-        await _sync_content_type(
-            store=store,
-            settings=settings,
-            known=known,
-            entities=notes,
-            content_type="note",
-            entity_id=lambda n: n.id,
-            fingerprint=fingerprint_note,
-            render_text=lambda n: n.content,
-            title=lambda n: n.title,
-            course_id=lambda n: n.course_id,
-            session_id=lambda n: n.session_id,
-        )
-
-        await _sync_content_type(
-            store=store,
-            settings=settings,
-            known=known,
-            entities=courses,
-            content_type="course",
-            entity_id=lambda c: c.id,
-            fingerprint=fingerprint_course,
-            render_text=render_course,
-            title=lambda c: c.name,
-            course_id=lambda _c: None,
-            session_id=lambda _c: None,
-        )
-
-        await _sync_content_type(
-            store=store,
-            settings=settings,
-            known=known,
-            entities=sessions,
-            content_type="session",
-            entity_id=lambda s: s.id,
-            fingerprint=fingerprint_session,
-            render_text=render_session,
-            title=lambda s: f"{s.course_name}, {s.start_time.strftime(DATETIME_FORMAT)}",
-            course_id=lambda s: s.course_id,
-            session_id=lambda _s: None,
-        )
-
-        # CourseGoalDto has no own id - course_id is its natural unique key
-        # (the API only ever returns one goal per course). If that ever
-        # changes, this silently keeps only the last-diffed goal per course.
-        await _sync_content_type(
-            store=store,
-            settings=settings,
-            known=known,
-            entities=course_goals,
-            content_type="course_goal",
-            entity_id=lambda g: g.course_id,
-            fingerprint=fingerprint_course_goal,
-            render_text=render_course_goal,
-            title=lambda g: f"{g.course_name} goal",
-            course_id=lambda g: g.course_id,
-            session_id=lambda _g: None,
-        )
+        for user in settings.ingestion_users:
+            logger.info("Sync: starting user_id=%s", user.user_id)
+            try:
+                await _sync_user(user=user, settings=settings, store=store)
+            except Exception:
+                logger.exception("Sync: failed for user_id=%s, skipping", user.user_id)
     finally:
         await store.close()
