@@ -129,9 +129,18 @@ async def _sync_content_type[T](
         await store.delete_entity(user_id=user_id, content_type=content_type, entity_id=eid)
 
 
-async def _sync_user(
+async def sync_user(
     *, user_id: str, ai_api_key: str, settings: Settings, store: QdrantStore
 ) -> None:
+    """Sync one user's notes/courses/sessions/course goals into their own Qdrant partition.
+
+    Public (not `_`-prefixed): called both by `sync_all()` below (looping over every
+    registered user) and directly by `api/internal.py`'s registration handler (a single user,
+    right after they register their key - see docs/decisions.md "Auto-ingestion on register").
+    Takes an already-open `store` rather than opening its own - the caller owns that lifecycle,
+    since `api/internal.py`'s caller reuses the app-lifetime `app.state.qdrant_store` instead of
+    opening a new connection per registration.
+    """
     known = await store.get_known_fingerprints(user_id=user_id)
 
     async with StudyLifeClient(
@@ -247,7 +256,7 @@ async def sync_all(settings: Settings) -> None:
                 logger.info("Sync: user_id=%s was revoked mid-run, skipping", user_id)
                 continue
             try:
-                await _sync_user(
+                await sync_user(
                     user_id=user_id, ai_api_key=ai_api_key, settings=settings, store=store
                 )
             except Exception:

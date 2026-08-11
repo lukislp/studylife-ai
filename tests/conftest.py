@@ -38,6 +38,15 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
     for module in ("chat", "agent", "identity", "internal"):
         monkeypatch.setattr(f"studylife_ai.api.{module}.get_settings", _fake_get_settings)
 
+    # Default: /internal/register-key's post-response auto-ingestion background task (see
+    # docs/decisions.md "Auto-ingestion on register") is a no-op unless a test specifically
+    # wants to exercise it - otherwise every test touching that endpoint would also attempt a
+    # real (and here, failing) sync against "http://studylife.test".
+    async def _noop_sync_user(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("studylife_ai.api.internal.sync_user", _noop_sync_user)
+
     # Runs the app's lifespan (startup/shutdown) — ASGITransport alone doesn't,
     # and /chat needs app.state.qdrant_store, which lifespan sets up.
     async with app.router.lifespan_context(app):
