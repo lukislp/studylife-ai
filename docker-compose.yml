@@ -11,6 +11,13 @@ services:
       # container-to-container calls.
       LLM_API_BASE: http://ollama:11434
       QDRANT_URL: http://qdrant:6333
+      # M4 agent: without a volume, this SQLite file would live in the
+      # container's writable layer and be lost on every `docker compose up
+      # --build`/recreate — defeating the whole point of a persistent
+      # checkpointer (see docs/decisions.md "M4 agent stack").
+      AGENT_CHECKPOINT_DB_PATH: /app/data/agent_checkpoints.db
+    volumes:
+      - agent_data:/app/data
     depends_on:
       - qdrant
       - ollama
@@ -37,3 +44,4 @@ services:
 volumes:
   qdrant_storage:
   ollama_data:
+  agent_data:
