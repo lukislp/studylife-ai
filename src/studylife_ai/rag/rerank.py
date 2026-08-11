@@ -16,20 +16,26 @@ logger = logging.getLogger(__name__)
 _CONTENT_PREVIEW_CHARS = 300
 
 _PROMPT_TEMPLATE = (
+    "Today's date is {today}.\n\n"
     "Rank the following passages by relevance to the question, most relevant "
-    "first. Reply with ONLY the passage numbers, comma-separated, most to "
-    'least relevant - e.g. "2,0,4,1,3". No other text.\n\n'
+    'first. If the question refers to a specific time (e.g. "today", "this '
+    'week", "tomorrow"), a session passage scheduled far from that actual '
+    "date is NOT relevant, even if it shares the same topic or course as a "
+    "well-matching passage - prefer the passage whose own date genuinely "
+    "matches what's being asked, over one that just reads similarly. Reply "
+    "with ONLY the passage numbers, comma-separated, most to least relevant "
+    '- e.g. "2,0,4,1,3". No other text.\n\n'
     "Question: {query}\n\n"
     "Passages:\n{passages}"
 )
 
 
-def _build_prompt(query: str, chunks: list[RetrievedChunk]) -> str:
+def _build_prompt(query: str, chunks: list[RetrievedChunk], *, today: str) -> str:
     passages = "\n".join(
         f"[{i}] ({chunk.content_type}) {chunk.title}: {chunk.content[:_CONTENT_PREVIEW_CHARS]}"
         for i, chunk in enumerate(chunks)
     )
-    return _PROMPT_TEMPLATE.format(query=query, passages=passages)
+    return _PROMPT_TEMPLATE.format(today=today, query=query, passages=passages)
 
 
 def _parse_order(response: str, num_candidates: int) -> list[int]:
@@ -74,15 +80,23 @@ async def rerank_chunks(
     model: str,
     api_base: str | None,
     timeout: float,
+    today: str,
 ) -> list[RetrievedChunk]:
     """Reorders `chunks` most-to-least relevant to `query`. Never raises -
     a bad or missing rerank result degrades to the original vector-search
     order instead of breaking retrieval, matching /chat's existing
-    "retrieval failed, continue anyway" fallback philosophy."""
+    "retrieval failed, continue anyway" fallback philosophy.
+
+    `today` grounds date-relative questions ("what's on today/this week?") -
+    found live: without it, pure text similarity ranked same-course sessions
+    from months away above the actual session happening today, since nothing
+    in the prompt let the reranker compare a passage's own date against the
+    real current one (see docs/decisions.md "Retrieval quality").
+    """
     if len(chunks) <= 1:
         return chunks
 
-    prompt = _build_prompt(query, chunks)
+    prompt = _build_prompt(query, chunks, today=today)
     try:
         response = await complete_chat(
             [ChatMessage(role="user", content=prompt)],

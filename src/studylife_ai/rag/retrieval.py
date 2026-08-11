@@ -11,6 +11,7 @@ is set.
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import get_args
 
 from studylife_ai.config import Settings
@@ -108,5 +109,6 @@ async def retrieve_with_rerank(
             model=settings.rerank_model,
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
+            today=datetime.now().strftime("%Y-%m-%d, %A"),
         )
     return chunks[: settings.retrieval_top_k]

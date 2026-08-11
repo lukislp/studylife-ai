@@ -22,12 +22,21 @@ def test_build_prompt_includes_query_and_truncates_long_content() -> None:
     long_content = "x" * 500
     chunks = [_chunk(1, "Eigenwerte", long_content)]
 
-    prompt = _build_prompt("Was sind Eigenwerte?", chunks)
+    prompt = _build_prompt("Was sind Eigenwerte?", chunks, today="2026-08-11, Tuesday")
 
     assert "Was sind Eigenwerte?" in prompt
     assert "[0] (note) Eigenwerte:" in prompt
     assert "x" * 300 in prompt
     assert "x" * 301 not in prompt
+
+
+def test_build_prompt_includes_todays_date_and_temporal_relevance_instruction() -> None:
+    prompt = _build_prompt(
+        "Was steht heute an?", [_chunk(1, "A", "...")], today="2026-08-11, Tuesday"
+    )
+
+    assert "2026-08-11, Tuesday" in prompt
+    assert "NOT relevant" in prompt
 
 
 def test_parse_order_reorders_by_well_formed_response() -> None:
@@ -60,7 +69,7 @@ async def test_rerank_chunks_reorders_using_model_response(monkeypatch: MonkeyPa
     monkeypatch.setattr(rerank_module, "complete_chat", fake_complete_chat)
 
     result = await rerank_chunks(
-        "query", chunks, model="ollama/llama3.2", api_base=None, timeout=30.0
+        "query", chunks, model="ollama/llama3.2", api_base=None, timeout=30.0, today="2026-08-11"
     )
 
     assert [c.title for c in result] == ["C", "A", "B"]
@@ -78,9 +87,15 @@ async def test_rerank_chunks_returns_unchanged_for_single_or_no_chunk(
 
     monkeypatch.setattr(rerank_module, "complete_chat", fake_complete_chat)
 
-    assert await rerank_chunks("q", [], model="m", api_base=None, timeout=30.0) == []
+    assert (
+        await rerank_chunks("q", [], model="m", api_base=None, timeout=30.0, today="2026-08-11")
+        == []
+    )
     one = [_chunk(1, "A", "...")]
-    assert await rerank_chunks("q", one, model="m", api_base=None, timeout=30.0) == one
+    assert (
+        await rerank_chunks("q", one, model="m", api_base=None, timeout=30.0, today="2026-08-11")
+        == one
+    )
     assert called is False
 
 
@@ -95,7 +110,7 @@ async def test_rerank_chunks_falls_back_to_original_order_on_llm_failure(
     monkeypatch.setattr(rerank_module, "complete_chat", failing_complete_chat)
 
     result = await rerank_chunks(
-        "query", chunks, model="ollama/llama3.2", api_base=None, timeout=30.0
+        "query", chunks, model="ollama/llama3.2", api_base=None, timeout=30.0, today="2026-08-11"
     )
 
     assert result == chunks
