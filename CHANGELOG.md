@@ -1,3 +1,10 @@
+## [1.3.5](https://github.com/lukislp/studylife-ai/compare/v1.3.4...v1.3.5) (2026-08-11)
+
+
+### Bug Fixes
+
+* **rag:** pin reranker temperature to 0 for deterministic ranking ([8afefc4](https://github.com/lukislp/studylife-ai/commit/8afefc4d5047d6fe9814070822d2d6bbec36b09f))
+
 ## [1.3.4](https://github.com/lukislp/studylife-ai/compare/v1.3.3...v1.3.4) (2026-08-11)
 
 
