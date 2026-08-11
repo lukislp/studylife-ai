@@ -10,7 +10,12 @@ from types import TracebackType
 
 import httpx
 
-from studylife_ai.studylife.models import StudyLifeNote
+from studylife_ai.studylife.models import (
+    CourseDto,
+    CourseGoalDto,
+    StudyLifeNote,
+    StudySessionDto,
+)
 
 
 class StudyLifeClient:
@@ -39,6 +44,36 @@ class StudyLifeClient:
         response = await self._client.get("/api/notes")
         response.raise_for_status()
         return [StudyLifeNote.model_validate(item) for item in response.json()]
+
+    async def get_courses(self) -> list[CourseDto]:
+        """Fetch the active study program's course catalog."""
+        response = await self._client.get("/api/courses")
+        response.raise_for_status()
+        return [CourseDto.model_validate(item) for item in response.json()]
+
+    async def get_sessions_history(
+        self, *, days: int, only_completed: bool
+    ) -> list[StudySessionDto]:
+        """Fetch study sessions (calendar entries) from the last `days` days.
+
+        `GET /api/sessions` is hard-capped to a fixed -7d/+90d window; this
+        endpoint is the only one with a configurable lookback.
+        """
+        response = await self._client.get(
+            "/api/sessions/history",
+            # Explicit lowercase string, not the raw bool - don't rely on
+            # httpx's implicit bool query-param encoding matching ASP.NET
+            # Core's model binder by luck.
+            params={"days": days, "onlyCompleted": str(only_completed).lower()},
+        )
+        response.raise_for_status()
+        return [StudySessionDto.model_validate(item) for item in response.json()]
+
+    async def get_course_goals(self) -> list[CourseGoalDto]:
+        """Fetch all course goals (one per course, at most)."""
+        response = await self._client.get("/api/coursegoals")
+        response.raise_for_status()
+        return [CourseGoalDto.model_validate(item) for item in response.json()]
 
     async def aclose(self) -> None:
         await self._client.aclose()
