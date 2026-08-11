@@ -82,8 +82,13 @@ class Settings(BaseSettings):
     # fetches an even per-content-type candidate quota first (see
     # rerank_candidate_k) - a popular course's many session chunks can no
     # longer crowd out a note just by outnumbering it, independent of
-    # whether rerank_model is set.
-    retrieval_top_k: int = 5
+    # whether rerank_model is set. Raised from 5 to 8 (see docs/decisions.md
+    # "Retrieval top-k raised") - even with the quota above, all 4 content
+    # types still get merged into one shared final cut, and a fixed 5-slot
+    # cut for 4 competing types was too tight to survive the reranker's
+    # normal (non-deterministic) run-to-run variance, confirmed via a real
+    # CI eval regression.
+    retrieval_top_k: int = 8
 
     # Target candidate pool retrieve_with_rerank() fetches before narrowing
     # down to retrieval_top_k, split evenly across the 4 content types (see

@@ -109,7 +109,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `QDRANT_COLLECTION`            | `studylife_notes`        | Qdrant collection name for all ingested chunks (notes, courses, sessions, course goals). |
 | `CHUNK_SIZE_TOKENS`            | `500`                     | Target chunk size in tokens (measured via `tiktoken`, provider-independent approximation). |
 | `CHUNK_OVERLAP_TOKENS`         | `75`                      | Overlap between consecutive chunks, in tokens.                              |
-| `RETRIEVAL_TOP_K`              | `5`                       | Final number of chunks handed to the LLM, after the candidate pool below is fetched and (optionally) reranked — see [Retrieval quality](docs/decisions.md). |
+| `RETRIEVAL_TOP_K`              | `8`                       | Final number of chunks handed to the LLM, after the candidate pool below is fetched and (optionally) reranked — see [Retrieval quality](docs/decisions.md). |
 | `RERANK_CANDIDATE_K`           | `20`                      | Target candidate pool size, split evenly across the 4 content types (note/course/session/course_goal) — always applied, independent of `RERANK_MODEL`. See [docs/decisions.md](docs/decisions.md). |
 | `RERANK_MODEL`                 | _(unset)_                 | LiteLLM model identifier for optional LLM-based reranking of the candidate pool, independent of `LLM_MODEL`. Unset = candidate pool is just sorted by vector-similarity score. See [docs/decisions.md](docs/decisions.md). |
 | `EVAL_JUDGE_MODEL`             | _(unset)_                 | LiteLLM model identifier for the RAGAS eval judge, deliberately independent of `LLM_MODEL` — see [Evaluation](#evaluation). Required to run `python -m studylife_ai.eval`. |
