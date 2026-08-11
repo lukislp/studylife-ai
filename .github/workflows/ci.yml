@@ -8,6 +8,19 @@ on:
 env:
   IMAGE: ghcr.io/lukislp/studylife-ai
 
+# Serializes the ENTIRE workflow run for pushes to main - not just the release-chain jobs
+# (get-version/docker/semantic-release, previously grouped on their own further down). Found
+# live: that narrower grouping still let two pushes' get-version dry-runs compute the SAME
+# next version, because lint/test ahead of it had no group at all - whichever push's lint/test
+# finished first could reach get-version before an earlier push's, regardless of push order,
+# so "serialize the tail three jobs" wasn't enough to prevent the interleaving. One shared group
+# for the whole run closes that gap entirely, at the cost of two overlapping pushes queueing
+# instead of running lint/test in parallel - an acceptable trade for a low-traffic personal
+# project. PRs get their own per-run group (github.run_id) so they're never blocked by this.
+concurrency:
+  group: ci-${{ github.event_name == 'push' && 'studylife-ai-main' || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -84,9 +97,6 @@ jobs:
     needs: [lint, test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     # @semantic-release/github verifies push/write access as part of its plugin
     # lifecycle even during a dry run - a read-only token fails that check
     # outright. No actual writes happen here regardless: dry_run: true never
@@ -121,9 +131,6 @@ jobs:
     needs: [get-version]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -181,9 +188,6 @@ jobs:
     needs: [get-version, docker]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     permissions:
       contents: write
       issues: write
