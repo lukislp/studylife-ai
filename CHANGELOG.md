@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/lukislp/studylife-ai/compare/v1.6.6...v1.7.0) (2026-08-12)
+
+
+### Features
+
+* **llm:** add reasoning_effort support for reasoning models ([68eec2e](https://github.com/lukislp/studylife-ai/commit/68eec2eec8edc411eab93e1790cc81539ae9a588))
+
 ## [1.6.6](https://github.com/lukislp/studylife-ai/compare/v1.6.5...v1.6.6) (2026-08-12)
 
 
