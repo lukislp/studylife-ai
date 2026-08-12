@@ -74,6 +74,17 @@ def test_build_context_system_message_instructs_skipping_days_without_data() -> 
     assert "do not list, enumerate, or note" in message
 
 
+def test_build_context_system_message_instructs_no_self_offered_actions() -> None:
+    """Regression test: live "letzte Woche" answers (3/3 runs) closed by asking "soll ich Sessions
+    planen?"/"soll ich das in deinen Kalender exportieren?" - /chat is read-only and can't take
+    any action itself (see api/chat.py's module docstring), only /agent can, with confirmation."""
+    message = build_context_system_message([])
+
+    assert "cannot take any actions yourself" in message
+    assert "Never offer to plan, create, save, export, or schedule" in message
+    assert "switch to Agent mode instead" in message
+
+
 def test_build_context_system_message_handles_no_chunks() -> None:
     message = build_context_system_message([])
 

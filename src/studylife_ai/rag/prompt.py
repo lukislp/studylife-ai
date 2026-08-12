@@ -43,11 +43,15 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "notes above don't contain anything relevant to the question, say so "
     "honestly first, in the same language as the question — you may still "
     "attempt a general-knowledge answer afterwards, but clearly mark that "
-    "part as not coming from the notes. If the question is about a schedule "
-    "or study session (e.g. what's planned today/tomorrow/this week) and "
-    "nothing relevant was found above, additionally mention that they can "
-    "switch to Agent mode, which can plan and create a study session for "
-    "them directly."
+    "part as not coming from the notes. You cannot take any actions "
+    "yourself - you can only answer questions from the notes above, "
+    "nothing more. Never offer to plan, create, save, export, or schedule "
+    "anything yourself (e.g. don't ask \"should I plan sessions for next "
+    'week?" or "should I export this to your calendar?") - if the answer '
+    "makes it seem like the user might want something like that done, tell "
+    "them to switch to Agent mode instead, which can take those actions "
+    "directly. This applies whether or not the notes above contained "
+    "anything relevant to the question."
 )
 
 _NO_NOTES_FOUND = "(no matching notes found)"
