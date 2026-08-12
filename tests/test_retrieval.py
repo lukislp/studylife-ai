@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import AsyncMock
 
 from pytest import MonkeyPatch
@@ -6,7 +6,7 @@ from pytest import MonkeyPatch
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.rag import retrieval as retrieval_module
-from studylife_ai.rag.retrieval import _fetch_sessions, retrieve_with_rerank
+from studylife_ai.rag.retrieval import _fetch_session_window, _fetch_sessions, retrieve_with_rerank
 
 
 def _settings(**overrides: object) -> Settings:
@@ -21,7 +21,13 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**defaults)  # type: ignore[arg-type]
 
 
-def _chunk_of_type(entity_id: int, title: str, content_type: str, score: float) -> RetrievedChunk:
+def _chunk_of_type(
+    entity_id: int,
+    title: str,
+    content_type: str,
+    score: float,
+    session_start: str | None = None,
+) -> RetrievedChunk:
     return RetrievedChunk(
         content_type=content_type,  # type: ignore[arg-type]
         entity_id=entity_id,
@@ -31,7 +37,7 @@ def _chunk_of_type(entity_id: int, title: str, content_type: str, score: float) 
         course_id=None,
         session_id=None,
         score=score,
-        session_start=None,
+        session_start=session_start,
     )
 
 
@@ -90,7 +96,12 @@ async def test_fetch_sessions_merges_window_and_topic_pools_deduped_by_entity_id
     store.get_sessions_in_window = fake_get_sessions_in_window
 
     result = await _fetch_sessions(
-        [0.1, 0.2], store=store, user_id="primary", settings=_settings(), top_k=5
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(),
+        today=date(2026, 8, 12),
+        top_k=5,
     )
 
     # entity_id=1: window pool wins (listed first, its title survives) over the topic pool's
@@ -104,6 +115,39 @@ async def test_fetch_sessions_merges_window_and_topic_pools_deduped_by_entity_id
     start, end = window_calls[0]["start"], window_calls[0]["end"]
     assert isinstance(start, datetime) and isinstance(end, datetime)
     assert (end - start).days == 28  # 2 * session_window_days=14
+
+
+async def test_fetch_session_window_caps_to_top_k_keeping_the_nearest_days(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test for the 2026-08-12 bug: get_sessions_in_window() itself is unbounded
+    (safety_cap=1000 only) and every chunk it returns has score=0.0, so an overflowing window
+    used to let the reranker's candidate pool balloon and let far-window sessions crowd out
+    near-term ones purely by position once merged with scored topic-vector hits. Fixed by
+    capping to top_k here, sorted by proximity to `today` so an overflow drops the FARTHEST
+    days, not the nearest ones "today/tomorrow"-style queries actually care about."""
+    today = date(2026, 8, 12)
+    # Deliberately unsorted and outnumbering top_k=2, spanning both directions from today.
+    unsorted_chunks = [
+        _chunk_of_type(1, "5 days out", "session", 0.0, session_start="2026-08-17"),
+        _chunk_of_type(2, "today", "session", 0.0, session_start="2026-08-12"),
+        _chunk_of_type(3, "3 days ago", "session", 0.0, session_start="2026-08-09"),
+        _chunk_of_type(4, "tomorrow", "session", 0.0, session_start="2026-08-13"),
+    ]
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return list(unsorted_chunks)
+
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    result = await _fetch_session_window(
+        store, user_id="primary", window_days=14, today=today, top_k=2
+    )
+
+    # Only the 2 nearest-to-today survive (today, tomorrow) - "3 days ago" and "5 days out" are
+    # dropped, not kept, even though "3 days ago" arrived earlier in the unsorted input.
+    assert [c.title for c in result] == ["today", "tomorrow"]
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(

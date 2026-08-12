@@ -20,7 +20,7 @@ range filter isn't.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import get_args
 
 from studylife_ai.config import Settings
@@ -54,13 +54,38 @@ async def _search_by_vector(
         return []
 
 
+def _days_from_today(session_start: str | None, *, today: date) -> int:
+    """Absolute day distance from `today` - a huge value (sorts last) for a missing/unparseable
+    date, which `get_sessions_in_window()`'s results should never actually have (its own range
+    filter excludes points without `session_start`), but mypy doesn't know that."""
+    if not session_start:
+        return 10**9
+    try:
+        return abs((date.fromisoformat(session_start[:10]) - today).days)
+    except ValueError:
+        return 10**9
+
+
 async def _fetch_session_window(
-    store: QdrantStore, *, user_id: str, window_days: int
+    store: QdrantStore, *, user_id: str, window_days: int, today: date, top_k: int
 ) -> list[RetrievedChunk]:
-    """Same never-raises contract as `_search_by_vector` above, for `get_sessions_in_window()`."""
+    """Same never-raises contract as `_search_by_vector` above, for `get_sessions_in_window()`.
+
+    Capped to `top_k` and sorted by proximity to `today` (closest first) before truncating -
+    `get_sessions_in_window()` itself is otherwise unbounded (`safety_cap=1000` only), and every
+    chunk it returns comes back with `score=0.0` (a plain scroll, not a vector search). Once
+    merged with the topic-vector pool below and globally sorted by score, an unbounded window
+    pool meant EVERY window chunk sorted behind ANY topic-matched chunk with a real similarity
+    score - crowding today/tomorrow-relevant sessions out of the reranker's effective attention
+    as account history grew (confirmed live, 2026-08-12: a ~30-chunk window let two topically-
+    similar sessions from 3 months earlier outrank the one real "tomorrow" session for a "what's
+    on tomorrow" query, purely via this position effect). Truncating by proximity, not scroll
+    order, means an overflow drops the FARTHEST-out window days first, not the nearest ones that
+    matter most for near-term queries.
+    """
     now = datetime.now()
     try:
-        return await store.get_sessions_in_window(
+        chunks = await store.get_sessions_in_window(
             user_id=user_id,
             start=now - timedelta(days=window_days),
             end=now + timedelta(days=window_days),
@@ -68,10 +93,18 @@ async def _fetch_session_window(
     except Exception:
         logger.exception("Qdrant session-window scroll failed")
         return []
+    chunks.sort(key=lambda c: _days_from_today(c.session_start, today=today))
+    return chunks[:top_k]
 
 
 async def _fetch_sessions(
-    vector: list[float], *, store: QdrantStore, user_id: str, settings: Settings, top_k: int
+    vector: list[float],
+    *,
+    store: QdrantStore,
+    user_id: str,
+    settings: Settings,
+    today: date,
+    top_k: int,
 ) -> list[RetrievedChunk]:
     """Sessions' two-pool fetch: the date-window above, plus a normal topic-vector search over
     ALL sessions (same `top_k` quota every other content type gets) so a question like "what did
@@ -79,7 +112,13 @@ async def _fetch_sessions(
     Merged and deduped by `entity_id`, window pool first (it's the one actually relevant to
     date-specific questions, which is the common case this whole design targets)."""
     window_chunks, topic_chunks = await asyncio.gather(
-        _fetch_session_window(store, user_id=user_id, window_days=settings.session_window_days),
+        _fetch_session_window(
+            store,
+            user_id=user_id,
+            window_days=settings.session_window_days,
+            today=today,
+            top_k=top_k,
+        ),
         _search_by_vector(
             vector, store=store, user_id=user_id, top_k=top_k, content_type="session"
         ),
@@ -115,6 +154,7 @@ async def retrieve_with_rerank(
     sorted by vector-similarity score. Either way, the final list is cut
     down to `settings.retrieval_top_k`.
     """
+    today = datetime.now().date()
     vectors = await embed_texts(
         [query], model=settings.embedding_model, call_site="retrieval", user_id=user_id
     )
@@ -138,7 +178,12 @@ async def retrieve_with_rerank(
         results = await asyncio.gather(
             *(
                 _fetch_sessions(
-                    vector, store=store, user_id=user_id, settings=settings, top_k=per_type_k
+                    vector,
+                    store=store,
+                    user_id=user_id,
+                    settings=settings,
+                    today=today,
+                    top_k=per_type_k,
                 )
                 if ct == "session"
                 else _search_by_vector(
@@ -161,7 +206,7 @@ async def retrieve_with_rerank(
             model=settings.rerank_model,
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
-            today=datetime.now().date(),
+            today=today,
             user_id=user_id,
         )
     return chunks[: settings.retrieval_top_k]
