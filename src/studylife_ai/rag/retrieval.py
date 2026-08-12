@@ -20,6 +20,7 @@ range filter isn't.
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import get_args
 
@@ -110,7 +111,13 @@ async def _fetch_session_window(
         logger.exception("Qdrant session-window scroll failed")
         return []
     chunks.sort(key=lambda c: _days_from_today(c.session_start, today=today))
-    return chunks[:top_k]
+    chunks = chunks[:top_k]
+    if date_range is not None:
+        # Tags every chunk from an exact, date_parse-resolved range as unconditionally relevant
+        # (see RetrievedChunk.exact_date_match and retrieve_with_rerank() below) - never done for
+        # the fixed +-window_days fallback, which is a proximity heuristic, not an exact filter.
+        chunks = [replace(c, exact_date_match=True) for c in chunks]
+    return chunks
 
 
 async def _fetch_sessions(
@@ -167,7 +174,12 @@ async def _fetch_sessions(
         user_id=user_id,
         window_days=settings.session_window_days,
         today=today,
-        top_k=settings.session_window_top_k,
+        # An exact resolved range gets its own, larger budget (date_range_chunk_cap) - it's not
+        # an approximate "nearest N sessions" guess like the fixed-window fallback, so it
+        # shouldn't be capped to the same small quota (see RetrievedChunk.exact_date_match).
+        top_k=settings.date_range_chunk_cap
+        if date_range is not None
+        else settings.session_window_top_k,
         date_range=date_range,
     )
     seen_ids = {c.entity_id for c in window_chunks}
@@ -257,4 +269,15 @@ async def retrieve_with_rerank(
             today=today,
             user_id=user_id,
         )
-    return chunks[: settings.retrieval_top_k]
+
+    # Chunks from an exact, date_parse-resolved date range (RetrievedChunk.exact_date_match) are
+    # unconditionally relevant to the question - retrieval_top_k exists to approximate relevance
+    # under uncertainty (vector similarity), which doesn't apply once a range is exact. They get
+    # their own, larger date_range_chunk_cap instead, on top of (not counted against) the normal
+    # retrieval_top_k budget everything else still gets. Confirmed live 2026-08-12: a real "last
+    # week" had 21 matching sessions, silently cut to 8 by the shared retrieval_top_k before this.
+    # When nothing is tagged (the common case - no date_range resolved, or the feature is unset),
+    # `exact_matches` is empty and this reduces to today's exact `chunks[:retrieval_top_k]`.
+    exact_matches = [c for c in chunks if c.exact_date_match]
+    rest = [c for c in chunks if not c.exact_date_match]
+    return exact_matches[: settings.date_range_chunk_cap] + rest[: settings.retrieval_top_k]

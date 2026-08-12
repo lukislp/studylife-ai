@@ -19,6 +19,7 @@ def _settings(**overrides: object) -> Settings:
         "session_window_days": 14,
         "session_window_top_k": 20,
         "date_parse_model": None,
+        "date_range_chunk_cap": 60,
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -30,6 +31,7 @@ def _chunk_of_type(
     content_type: str,
     score: float,
     session_start: str | None = None,
+    exact_date_match: bool = False,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         content_type=content_type,  # type: ignore[arg-type]
@@ -41,6 +43,7 @@ def _chunk_of_type(
         session_id=None,
         score=score,
         session_start=session_start,
+        exact_date_match=exact_date_match,
     )
 
 
@@ -154,6 +157,36 @@ async def test_fetch_session_window_caps_to_top_k_keeping_the_nearest_days(
     assert [c.title for c in result] == ["today", "tomorrow"]
 
 
+async def test_fetch_session_window_tags_chunks_only_when_an_exact_range_was_given(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """RetrievedChunk.exact_date_match must be True only for a resolved, exact date_range - the
+    fixed +-window_days fallback is a proximity heuristic, not an exact filter, so its chunks
+    must NOT be exempted from retrieve_with_rerank()'s normal retrieval_top_k cut."""
+    today = date(2026, 8, 12)
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return [_chunk_of_type(1, "session", "session", 0.0, session_start="2026-08-12")]
+
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    fixed_window_result = await _fetch_session_window(
+        store, user_id="primary", window_days=14, today=today, top_k=5
+    )
+    assert fixed_window_result[0].exact_date_match is False
+
+    exact_range_result = await _fetch_session_window(
+        store,
+        user_id="primary",
+        window_days=14,
+        today=today,
+        top_k=5,
+        date_range=DateRange(date(2026, 8, 12), date(2026, 8, 12)),
+    )
+    assert exact_range_result[0].exact_date_match is True
+
+
 async def test_fetch_sessions_uses_session_window_top_k_not_the_shared_per_type_quota(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -224,6 +257,44 @@ async def test_fetch_sessions_uses_parsed_date_range_instead_of_fixed_window(
     assert window_calls[0]["end"] == datetime(2026, 8, 9, 23, 59, 59, 999999)
 
 
+async def test_fetch_sessions_uses_date_range_chunk_cap_when_range_resolved(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test for the 2026-08-12 "21 real sessions in a week, only 8 survived" bug: an
+    exact resolved range must get date_range_chunk_cap's larger budget, not the smaller
+    session_window_top_k meant for the fixed-window fallback's proximity guessing."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_session_window(store: object, **kwargs: object) -> list[RetrievedChunk]:
+        captured.update(kwargs)
+        return []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_parse_date_range(query: str, **kwargs: object) -> DateRange:
+        return DateRange(date(2026, 8, 3), date(2026, 8, 9))
+
+    monkeypatch.setattr(retrieval_module, "_fetch_session_window", fake_fetch_session_window)
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    monkeypatch.setattr(retrieval_module, "parse_date_range", fake_parse_date_range)
+    store = AsyncMock()
+
+    await _fetch_sessions(
+        "letzte Woche",
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(
+            date_parse_model="openai/gpt-4o", session_window_top_k=20, date_range_chunk_cap=60
+        ),
+        today=date(2026, 8, 12),
+        top_k=5,
+    )
+
+    assert captured["top_k"] == 60
+
+
 async def test_fetch_sessions_skips_date_parsing_when_date_parse_model_unset(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -286,6 +357,48 @@ async def test_fetch_sessions_falls_back_to_fixed_window_when_parsing_returns_no
     start, end = window_calls[0]["start"], window_calls[0]["end"]
     assert isinstance(start, datetime) and isinstance(end, datetime)
     assert (end - start).days == 28
+
+
+async def test_retrieve_with_rerank_exempts_exact_date_matches_from_retrieval_top_k(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test for the 2026-08-12 "21 real sessions in a week, only 8 survived" bug:
+    exact_date_match=True chunks must bypass retrieval_top_k, capped only by
+    date_range_chunk_cap - while ordinary chunks (exact_date_match=False) still respect
+    retrieval_top_k as before."""
+    exact_matches = [
+        _chunk_of_type(i, f"exact-{i}", "session", 0.0, exact_date_match=True) for i in range(7)
+    ]
+    ordinary = [_chunk_of_type(100 + i, f"note-{i}", "note", 0.9 - i * 0.1) for i in range(3)]
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return ordinary if kwargs["content_type"] == "note" else []
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return exact_matches
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    result = await retrieve_with_rerank(
+        "query",
+        store=store,
+        settings=_settings(rerank_model=None, retrieval_top_k=2, date_range_chunk_cap=60),
+        user_id="primary",
+    )
+
+    # All 7 exact matches survive (well under the cap of 60) despite retrieval_top_k=2 - plus up
+    # to 2 ordinary chunks (retrieval_top_k still applies to those, unaffected).
+    result_titles = {c.title for c in result}
+    assert {c.title for c in exact_matches} <= result_titles
+    assert len([t for t in result_titles if t.startswith("note-")]) == 2
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(

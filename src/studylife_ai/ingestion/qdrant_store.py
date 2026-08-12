@@ -56,6 +56,13 @@ class RetrievedChunk:
     session_id: int | None
     score: float
     session_start: str | None
+    # Set by rag/retrieval.py's _fetch_session_window() when this chunk came from an exact,
+    # date_parse-resolved date range (see docs/decisions.md "Exempt exact date-range matches from
+    # the shared top-k") - never set here in qdrant_store.py itself. Marks a chunk that should
+    # bypass the usual relevance-based top-k truncation: once a question's date range is resolved
+    # deterministically, every chunk inside it is unconditionally relevant, so an approximate
+    # top-k cutoff (meant for uncertain vector-similarity relevance) shouldn't drop it.
+    exact_date_match: bool = False
 
 
 def _user_id_condition(user_id: str) -> models.FieldCondition:

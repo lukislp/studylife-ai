@@ -93,6 +93,19 @@ class Settings(BaseSettings):
     # llm_model/rerank_model, same pattern as every other model concern here.
     date_parse_model: str | None = None
 
+    # Cap on session chunks kept when date_parse_model resolved an exact date range for this
+    # query (see docs/decisions.md "Exempt exact date-range matches from the shared top-k").
+    # Used two ways: (1) how many chunks _fetch_session_window() keeps from that exact range
+    # (proximity-to-today sorted, like session_window_top_k), and (2) how many of those
+    # exact-match chunks retrieve_with_rerank() lets bypass the normal retrieval_top_k final cut
+    # - confirmed live 2026-08-12: a real "last week" had 21 matching sessions, but the shared
+    # retrieval_top_k=8 final cut (meant for uncertain vector-similarity relevance across ALL
+    # content types) silently dropped more than half of them, even though every one of them is
+    # unconditionally relevant once the date range itself is exact. Set well above a typical
+    # week's session count; still a hard cap, not a real fix for month/year-scale ranges - very
+    # large ranges are a known, flagged soft edge (see docs/decisions.md), not solved here.
+    date_range_chunk_cap: int = 60
+
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.
     embedding_model: str = "ollama/nomic-embed-text"
