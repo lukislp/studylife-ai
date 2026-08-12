@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/lukislp/studylife-ai/compare/v1.7.1...v1.8.0) (2026-08-12)
+
+
+### Features
+
+* **config:** default to gpt-5-mini + minimal reasoning, fix agent parity and week framing ([6369696](https://github.com/lukislp/studylife-ai/commit/63696967a102a8b5b58291d5c656c78f94a67e5c))
+
 ## [1.7.1](https://github.com/lukislp/studylife-ai/compare/v1.7.0...v1.7.1) (2026-08-12)
 
 
