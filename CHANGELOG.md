@@ -1,3 +1,10 @@
+## [1.9.1](https://github.com/lukislp/studylife-ai/compare/v1.9.0...v1.9.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **config:** promote gpt-5-mini + minimal reasoning to the RERANK_MODEL default ([4bbdaaf](https://github.com/lukislp/studylife-ai/commit/4bbdaaf0cdb90b55ba80bcde67974fa349c1b88c))
+
 # [1.9.0](https://github.com/lukislp/studylife-ai/compare/v1.8.0...v1.9.0) (2026-08-12)
 
 
