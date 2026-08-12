@@ -74,6 +74,17 @@ def test_build_context_system_message_instructs_skipping_days_without_data() -> 
     assert "do not list, enumerate, or note" in message
 
 
+def test_build_context_system_message_instructs_listing_every_session_entry() -> None:
+    """Regression test: live "letzte Woche" answers (2026-08-12) reproducibly truncated a
+    21-entry session list partway through (12/21, then 18/21) despite every entry being present
+    in the numbered context and even in the sources list - a generation completeness issue, not
+    a retrieval one."""
+    message = build_context_system_message([])
+
+    assert "you MUST include every single one of them" in message
+    assert "never shorten, summarize, or silently drop entries" in message
+
+
 def test_build_context_system_message_handles_no_chunks() -> None:
     message = build_context_system_message([])
 
