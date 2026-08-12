@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/lukislp/studylife-ai/compare/v1.6.2...v1.6.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** derive session-summary course name from Sessions, skip empty days ([011eff3](https://github.com/lukislp/studylife-ai/commit/011eff3bbcfc141e251d97dee8730ba7df09471b))
+
 ## [1.6.2](https://github.com/lukislp/studylife-ai/compare/v1.6.1...v1.6.2) (2026-08-12)
 
 
