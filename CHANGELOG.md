@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/lukislp/studylife-ai/compare/v1.5.0...v1.5.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** cap session date-window pool, sorted by proximity to today ([2a236ac](https://github.com/lukislp/studylife-ai/commit/2a236ac470e084758c8aa3146386878e14101fab))
+
 # [1.5.0](https://github.com/lukislp/studylife-ai/compare/v1.4.0...v1.5.0) (2026-08-12)
 
 
