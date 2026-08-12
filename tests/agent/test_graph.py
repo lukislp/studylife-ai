@@ -43,6 +43,24 @@ def _build_agent_with_fake_model(monkeypatch: MonkeyPatch, responses: list[AIMes
     return agent, fake_studylife
 
 
+def test_build_agent_passes_reasoning_effort_to_chatlitellm(monkeypatch: MonkeyPatch) -> None:
+    """Regression test: reasoning models spend real, billed tokens "thinking" before any
+    visible output unless reasoning_effort is set - see docs/decisions.md. The agent shares
+    settings.llm_model with /chat, so it needs the same passthrough."""
+    captured: dict[str, object] = {}
+
+    def fake_chatlitellm(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return FakeToolCallingModel(responses=[AIMessage(content="ok")])
+
+    monkeypatch.setattr(graph_module, "ChatLiteLLM", fake_chatlitellm)
+
+    settings = _settings().model_copy(update={"llm_reasoning_effort": "minimal"})
+    build_agent(tools=[], checkpointer=InMemorySaver(), settings=settings)
+
+    assert captured["model_kwargs"]["reasoning_effort"] == "minimal"
+
+
 async def test_write_tool_pauses_and_does_not_execute_until_approved(
     monkeypatch: MonkeyPatch,
 ) -> None:

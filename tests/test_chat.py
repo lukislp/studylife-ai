@@ -164,6 +164,40 @@ async def test_chat_augments_llm_messages_with_retrieved_context(
     }
 
 
+async def test_chat_states_this_and_last_week_boundaries_as_ground_truth(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Regression test: a live "letzte Woche" answer correctly listed all 21 sessions but its
+    own framing sentence mislabeled the (correctly resolved) range as "the week before last
+    week" - the model was left to compute the week relationship itself. Stating the exact
+    boundaries removes that arithmetic from the answering LLM too, same as date_parse.py already
+    does for retrieval."""
+    from datetime import datetime
+
+    from studylife_ai.rag.date_parse import week_bounds
+
+    _mock_no_retrieval(monkeypatch)
+    captured_messages: list[dict[str, str]] = []
+
+    async def fake_acompletion(
+        *_args: object, messages: list[dict[str, str]], **_kwargs: object
+    ) -> object:
+        captured_messages.extend(messages)
+        return _make_fake_stream(["Hello"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+
+    response = await client.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
+
+    assert response.status_code == 200
+    today = datetime.now().date()
+    this_week = week_bounds(today, weeks_ago=0)
+    last_week = week_bounds(today, weeks_ago=1)
+    content = captured_messages[1]["content"]
+    assert f"This week (Monday-Sunday) is {this_week.start} to {this_week.end}" in content
+    assert f"Last week (Monday-Sunday) is {last_week.start} to {last_week.end}" in content
+
+
 async def test_chat_returns_401_when_proxy_token_header_is_missing(
     client: AsyncClient,
 ) -> None:

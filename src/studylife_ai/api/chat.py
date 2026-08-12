@@ -29,6 +29,7 @@ from studylife_ai.api.rate_limit import enforce_rate_limit
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.llm.client import stream_chat_completion
+from studylife_ai.rag.date_parse import week_bounds
 from studylife_ai.rag.prompt import build_context_system_message, sources_payload
 from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.schemas.chat import ChatMessage, ChatRequest
@@ -71,8 +72,24 @@ async def _sse_event_stream(
     # as api/agent.py's identical injection (found live: /chat asserted a specific "today" that
     # was months off). Local time, not UTC - matches StudyLife's own sessions, which store naive
     # local timestamps (see docs/decisions.md).
-    now = datetime.now().strftime("%Y-%m-%d %H:%M, %A")
-    date_message = ChatMessage(role="system", content=f"The current date and time is {now}.")
+    now = datetime.now()
+    this_week = week_bounds(now.date(), weeks_ago=0)
+    last_week = week_bounds(now.date(), weeks_ago=1)
+    # States the exact Mon-Sun week boundaries as ground truth, not just "today" - found live
+    # (2026-08-12): even with the correct sessions retrieved and listed, the answering model's
+    # own framing sentence mislabeled a correctly-resolved "last week" range as "the week before
+    # last week" - the same "don't let the LLM compute date/week arithmetic itself" fix already
+    # applied to retrieval (date_parse.py) and reranking (rerank.py), now applied to how the
+    # answer describes the range too. Reuses date_parse.py's week_bounds() so this can never
+    # disagree with what was actually retrieved for a "last week"/"this week" question.
+    date_message = ChatMessage(
+        role="system",
+        content=(
+            f"The current date and time is {now.strftime('%Y-%m-%d %H:%M, %A')}. "
+            f"This week (Monday-Sunday) is {this_week.start} to {this_week.end}. "
+            f"Last week (Monday-Sunday) is {last_week.start} to {last_week.end}."
+        ),
+    )
     augmented_messages = [context_message, date_message, *request.messages]
     # Computed once, up front, from the already-retrieved chunks — independent of
     # whether the LLM call below succeeds, so a client always learns which notes

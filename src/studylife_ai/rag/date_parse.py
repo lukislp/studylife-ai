@@ -71,7 +71,11 @@ def _month_bounds(year: int, month: int) -> DateRange:
     return DateRange(date(year, month, 1), date(year, month, last_day))
 
 
-def _week_bounds(today: date, *, weeks_ago: int) -> DateRange:
+def week_bounds(today: date, *, weeks_ago: int) -> DateRange:
+    """The Mon-Sun week `weeks_ago` weeks before the week containing `today` (0 = this week,
+    1 = last week). Public - also used by api/chat.py to state this week's/last week's exact
+    boundaries as ground truth in the answer-generation prompt (see docs/decisions.md "State
+    week boundaries as ground truth for the answering LLM too"), not just for retrieval."""
     this_monday = today - timedelta(days=today.weekday())
     monday = this_monday - timedelta(weeks=weeks_ago)
     return DateRange(monday, monday + timedelta(days=6))
@@ -92,9 +96,9 @@ def _resolve_named_range(token: str, *, today: date) -> DateRange | None:
     deterministic - flagged in docs/decisions.md, not chased further here.
     """
     if token == "THIS_WEEK":
-        return _week_bounds(today, weeks_ago=0)
+        return week_bounds(today, weeks_ago=0)
     if token == "LAST_WEEK":
-        return _week_bounds(today, weeks_ago=1)
+        return week_bounds(today, weeks_ago=1)
     if token == "THIS_MONTH":
         return _month_bounds(today.year, today.month)
     if token == "SINCE_MONTH_START":

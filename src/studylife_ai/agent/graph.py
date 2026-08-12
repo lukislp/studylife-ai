@@ -34,7 +34,12 @@ def build_agent(
     model = ChatLiteLLM(
         model=settings.llm_model,
         api_base=settings.llm_api_base,
-        model_kwargs={"metadata": {"call_site": "agent", "user_id": user_id}},
+        model_kwargs={
+            "metadata": {"call_site": "agent", "user_id": user_id},
+            # None is stripped by LiteLLM before the request goes out (same convention as
+            # llm/client.py) - correct for non-reasoning models, which don't accept this param.
+            "reasoning_effort": settings.llm_reasoning_effort,
+        },
     )
     return create_agent(
         model=model,
