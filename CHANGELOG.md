@@ -1,3 +1,10 @@
+## [1.6.5](https://github.com/lukislp/studylife-ai/compare/v1.6.4...v1.6.5) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** drop the "list every session" instruction, it made completeness worse ([c215e6e](https://github.com/lukislp/studylife-ai/commit/c215e6e7bada17f8a40dba5d50ec2a54a99ece21))
+
 ## [1.6.4](https://github.com/lukislp/studylife-ai/compare/v1.6.3...v1.6.4) (2026-08-12)
 
 
