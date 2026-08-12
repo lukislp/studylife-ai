@@ -1,3 +1,10 @@
+## [1.5.2](https://github.com/lukislp/studylife-ai/compare/v1.5.1...v1.5.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **retrieval:** give session-window fetch its own, larger candidate budget ([c5b12e0](https://github.com/lukislp/studylife-ai/commit/c5b12e062d2c8089f09cbf2944f1a640e1762a44))
+
 ## [1.5.1](https://github.com/lukislp/studylife-ai/compare/v1.5.0...v1.5.1) (2026-08-12)
 
 
