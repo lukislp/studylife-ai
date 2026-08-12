@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/lukislp/studylife-ai/compare/v1.6.0...v1.6.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** stop asking the date-range LLM to compute week/month boundaries ([4aa6a9f](https://github.com/lukislp/studylife-ai/commit/4aa6a9f3f7c55dd442e697b6ca61a72fe1b1734c))
+
 # [1.6.0](https://github.com/lukislp/studylife-ai/compare/v1.5.2...v1.6.0) (2026-08-12)
 
 
