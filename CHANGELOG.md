@@ -1,3 +1,10 @@
+## [1.6.6](https://github.com/lukislp/studylife-ai/compare/v1.6.5...v1.6.6) (2026-08-12)
+
+
+### Bug Fixes
+
+* **config:** default LLM_MODEL to gpt-4o in prod ([566e5f7](https://github.com/lukislp/studylife-ai/commit/566e5f7d65191c1baa1eaaf0080287362d90a79e))
+
 ## [1.6.5](https://github.com/lukislp/studylife-ai/compare/v1.6.4...v1.6.5) (2026-08-12)
 
 
