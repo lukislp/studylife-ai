@@ -58,9 +58,8 @@ jobs:
     # @semantic-release/github's verifyConditions step checks the token has repo push access
     # (contents: write) even during a dry run - a read-only token fails that check outright.
     # issues:write/pull-requests:write are NOT needed here: those only get exercised by the
-    # publish/success/fail lifecycle steps, which dry_run: true skips entirely. Being tested
-    # live (2026-08-12) - if this job starts failing verifyConditions, revert and see
-    # docs/decisions.md.
+    # publish/success/fail lifecycle steps, which dry_run: true skips entirely - confirmed
+    # live (2026-08-12, docs/decisions.md).
     permissions:
       contents: write
     outputs:
