@@ -76,7 +76,12 @@ async def seed_fixture_notes(
             overlap_tokens=settings.chunk_overlap_tokens,
         )
         vectors = (
-            await embed_texts(chunks, model=settings.embedding_model, call_site="eval-fixture")
+            await embed_texts(
+                chunks,
+                model=settings.embedding_model,
+                call_site="eval-fixture",
+                user_id=settings.eval_user_id,
+            )
             if chunks
             else []
         )

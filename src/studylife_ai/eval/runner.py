@@ -80,6 +80,7 @@ async def _generate_answer(
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
             call_site="eval",
+            user_id=settings.eval_user_id,
         )
     ]
     return "".join(deltas), chunks
@@ -96,32 +97,41 @@ class _JudgeEmbeddings(BaseRagasEmbeddings):
     llm_factory() vs BaseRagasLLM above.
     """
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, user_id: str) -> None:
         super().__init__()
         self._model = model
+        self._user_id = user_id
 
     def embed_query(self, text: str) -> list[float]:
         response = litellm.embedding(
-            model=self._model, input=[text], metadata={"call_site": "eval-judge"}
+            model=self._model,
+            input=[text],
+            metadata={"call_site": "eval-judge", "user_id": self._user_id},
         )
         return list(response.data[0]["embedding"])
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         response = litellm.embedding(
-            model=self._model, input=texts, metadata={"call_site": "eval-judge"}
+            model=self._model,
+            input=texts,
+            metadata={"call_site": "eval-judge", "user_id": self._user_id},
         )
         ordered = sorted(response.data, key=lambda item: item["index"])
         return [item["embedding"] for item in ordered]
 
     async def aembed_query(self, text: str) -> list[float]:
         response = await litellm.aembedding(
-            model=self._model, input=[text], metadata={"call_site": "eval-judge"}
+            model=self._model,
+            input=[text],
+            metadata={"call_site": "eval-judge", "user_id": self._user_id},
         )
         return list(response.data[0]["embedding"])
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         response = await litellm.aembedding(
-            model=self._model, input=texts, metadata={"call_site": "eval-judge"}
+            model=self._model,
+            input=texts,
+            metadata={"call_site": "eval-judge", "user_id": self._user_id},
         )
         ordered = sorted(response.data, key=lambda item: item["index"])
         return [item["embedding"] for item in ordered]
@@ -148,10 +158,14 @@ def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, BaseRagasEmbeddings]
     judge_llm = LangchainLLMWrapper(
         ChatLiteLLM(
             model=settings.eval_judge_model,
-            model_kwargs={"metadata": {"call_site": "eval-judge"}},
+            model_kwargs={
+                "metadata": {"call_site": "eval-judge", "user_id": settings.eval_user_id}
+            },
         )
     )
-    judge_embeddings = _JudgeEmbeddings(model=settings.embedding_model)
+    judge_embeddings = _JudgeEmbeddings(
+        model=settings.embedding_model, user_id=settings.eval_user_id
+    )
     return judge_llm, judge_embeddings
 
 

@@ -26,6 +26,12 @@ dependencies = [
     # dependency of langgraph-checkpoint-sqlite - declared explicitly so it
     # isn't an undeclared import.
     "aiosqlite>=0.20",
+    # Metrics dashboard (see docs/decisions.md "Metrics dashboard"): exposes /metrics for the
+    # existing self-hosted Prometheus (studylife repo's k8s/14-prometheus.yaml) to scrape -
+    # wraps prometheus_client with FastAPI HTTP auto-instrumentation (request rate/latency/
+    # status per endpoint) on top of the LLM cost/latency/token counters registered by hand
+    # in llm/metrics.py.
+    "prometheus-fastapi-instrumentator>=7.0",
 ]
 
 [tool.uv]

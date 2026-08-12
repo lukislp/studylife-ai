@@ -90,7 +90,10 @@ def _build_agent(
         user_id=identity.user_id,
     )
     return build_agent(
-        tools=tools, checkpointer=http_request.app.state.agent_checkpointer, settings=settings
+        tools=tools,
+        checkpointer=http_request.app.state.agent_checkpointer,
+        settings=settings,
+        user_id=identity.user_id,
     )
 
 

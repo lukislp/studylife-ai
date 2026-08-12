@@ -115,7 +115,9 @@ async def retrieve_with_rerank(
     sorted by vector-similarity score. Either way, the final list is cut
     down to `settings.retrieval_top_k`.
     """
-    vectors = await embed_texts([query], model=settings.embedding_model, call_site="retrieval")
+    vectors = await embed_texts(
+        [query], model=settings.embedding_model, call_site="retrieval", user_id=user_id
+    )
     if not vectors:
         return []
     vector = vectors[0]
@@ -160,5 +162,6 @@ async def retrieve_with_rerank(
             api_base=settings.llm_api_base,
             timeout=settings.llm_request_timeout_seconds,
             today=datetime.now().date(),
+            user_id=user_id,
         )
     return chunks[: settings.retrieval_top_k]

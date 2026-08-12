@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from studylife_ai.api import agent, chat, health, internal
 from studylife_ai.config import get_settings
@@ -72,6 +73,11 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(agent.router)
     app.include_router(internal.router)
+    # HTTP request rate/latency/status per endpoint, exposed at /metrics for Prometheus to
+    # scrape (see docs/decisions.md "Metrics dashboard") - on top of the hand-registered LLM
+    # cost/latency/token counters in llm/metrics.py, which cover the actual model-call cost
+    # this auto-instrumentation can't see.
+    Instrumentator().instrument(app).expose(app)
     return app
 
 

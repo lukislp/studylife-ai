@@ -123,6 +123,7 @@ async def rerank_chunks(
     api_base: str | None,
     timeout: float,
     today: date,
+    user_id: str = "unknown",
 ) -> list[RetrievedChunk]:
     """Reorders `chunks` most-to-least relevant to `query`. Never raises -
     a bad or missing rerank result degrades to the original vector-search
@@ -157,6 +158,7 @@ async def rerank_chunks(
             api_base=api_base,
             timeout=timeout,
             call_site="rerank",
+            user_id=user_id,
             temperature=0.0,
         )
     except Exception:

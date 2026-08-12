@@ -120,7 +120,9 @@ async def sync_content_type[T](
             overlap_tokens=settings.chunk_overlap_tokens,
         )
         vectors = (
-            await embed_texts(chunks, model=settings.embedding_model, call_site="ingestion")
+            await embed_texts(
+                chunks, model=settings.embedding_model, call_site="ingestion", user_id=user_id
+            )
             if chunks
             else []
         )

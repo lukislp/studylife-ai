@@ -7,7 +7,7 @@ from pytest import MonkeyPatch
 
 from studylife_ai.api.identity import PROXY_TOKEN_HEADER
 from studylife_ai.ingestion.qdrant_store import RetrievedChunk
-from tests.conftest import TEST_SHARED_SECRET, make_proxy_token
+from tests.conftest import TEST_SHARED_SECRET, TEST_USER_ID, make_proxy_token
 
 
 def _make_fake_stream(texts: list[str]) -> object:
@@ -53,10 +53,10 @@ async def test_chat_streams_llm_deltas_and_sources_as_sse(
     events = _parse_sse_events(response.text)
     assert events == [{"delta": "Hello"}, {"delta": ", world!"}, {"sources": []}]
     assert response.text.strip().endswith("data: [DONE]")
-    # M5: cost/latency logging (llm/logging.py) reads the call site from
-    # this metadata - a regression here would silently break call-site
+    # M5: cost/latency logging (llm/logging.py) reads call_site/user_id from
+    # this metadata - a regression here would silently break call-site/user
     # tagging without failing any logging test on its own.
-    assert calls[0]["metadata"] == {"call_site": "chat"}
+    assert calls[0]["metadata"] == {"call_site": "chat", "user_id": TEST_USER_ID}
 
 
 async def test_chat_streams_error_event_on_llm_failure(

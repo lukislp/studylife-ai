@@ -21,12 +21,20 @@ _WRITE_TOOLS = {"create_study_session", "save_note"}
 
 
 def build_agent(
-    *, tools: list[BaseTool], checkpointer: BaseCheckpointSaver[Any], settings: Settings
+    *,
+    tools: list[BaseTool],
+    checkpointer: BaseCheckpointSaver[Any],
+    settings: Settings,
+    user_id: str = "unknown",
 ) -> Any:
+    # Safe to bake user_id into this model instance's static metadata (rather than pass it
+    # per-invocation) because build_agent() is called fresh per request (see api/agent.py
+    # "Agent graph: rebuilt per request", docs/decisions.md "M4.5 Multi-user support") - never
+    # a shared, cross-user singleton.
     model = ChatLiteLLM(
         model=settings.llm_model,
         api_base=settings.llm_api_base,
-        model_kwargs={"metadata": {"call_site": "agent"}},
+        model_kwargs={"metadata": {"call_site": "agent", "user_id": user_id}},
     )
     return create_agent(
         model=model,

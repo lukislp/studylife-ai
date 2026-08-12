@@ -12,22 +12,39 @@ from datetime import datetime
 import litellm
 from litellm.integrations.custom_logger import CustomLogger
 
+from studylife_ai.llm.metrics import (
+    LLM_CALLS_TOTAL,
+    LLM_COMPLETION_TOKENS_TOTAL,
+    LLM_COST_USD_TOTAL,
+    LLM_LATENCY_SECONDS,
+    LLM_PROMPT_TOKENS_TOTAL,
+)
+
 logger = logging.getLogger("studylife_ai.llm.usage")
 
 
-def _call_site(kwargs: dict[str, object]) -> str:
+def _metadata(kwargs: dict[str, object]) -> dict[str, object]:
     litellm_params = kwargs.get("litellm_params")
     if not isinstance(litellm_params, dict):
-        return "unknown"
+        return {}
     metadata = litellm_params.get("metadata")
-    if not isinstance(metadata, dict):
-        return "unknown"
-    call_site = metadata.get("call_site")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _call_site(kwargs: dict[str, object]) -> str:
+    call_site = _metadata(kwargs).get("call_site")
     return call_site if isinstance(call_site, str) else "unknown"
 
 
+def _user_id(kwargs: dict[str, object]) -> str:
+    user_id = _metadata(kwargs).get("user_id")
+    return user_id if isinstance(user_id, str) else "unknown"
+
+
 class UsageLogger(CustomLogger):
-    """Logs model, call site, latency, tokens and cost after each call.
+    """Logs model, call site, latency, tokens and cost after each call, and
+    records the same values as Prometheus metrics (`llm/metrics.py`) for the
+    Grafana dashboard - see docs/decisions.md "Metrics dashboard".
 
     Cost is read from `response_cost`, the same value LiteLLM itself
     computed from its model price map - correct for known API models,
@@ -42,17 +59,35 @@ class UsageLogger(CustomLogger):
         start_time: datetime,
         end_time: datetime,
     ) -> None:
+        call_site = _call_site(kwargs)
+        model = str(kwargs.get("model"))
+        user_id = _user_id(kwargs)
+        latency_seconds = (end_time - start_time).total_seconds()
         usage = getattr(response_obj, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        cost_usd = kwargs.get("response_cost")
+
         logger.info(
             "llm_call call_site=%s model=%s latency_ms=%.0f prompt_tokens=%s "
             "completion_tokens=%s cost_usd=%s",
-            _call_site(kwargs),
-            kwargs.get("model"),
-            (end_time - start_time).total_seconds() * 1000,
-            getattr(usage, "prompt_tokens", None),
-            getattr(usage, "completion_tokens", None),
-            kwargs.get("response_cost"),
+            call_site,
+            model,
+            latency_seconds * 1000,
+            prompt_tokens,
+            completion_tokens,
+            cost_usd,
         )
+
+        labels = {"call_site": call_site, "model": model, "user_id": user_id}
+        LLM_CALLS_TOTAL.labels(**labels, status="success").inc()
+        LLM_LATENCY_SECONDS.labels(**labels).observe(latency_seconds)
+        if isinstance(cost_usd, int | float):
+            LLM_COST_USD_TOTAL.labels(**labels).inc(cost_usd)
+        if isinstance(prompt_tokens, int):
+            LLM_PROMPT_TOKENS_TOTAL.labels(**labels).inc(prompt_tokens)
+        if isinstance(completion_tokens, int):
+            LLM_COMPLETION_TOKENS_TOTAL.labels(**labels).inc(completion_tokens)
 
     async def async_log_failure_event(
         self,
@@ -61,14 +96,23 @@ class UsageLogger(CustomLogger):
         start_time: datetime,
         end_time: datetime,
     ) -> None:
+        call_site = _call_site(kwargs)
+        model = str(kwargs.get("model"))
+        user_id = _user_id(kwargs)
+        latency_seconds = (end_time - start_time).total_seconds()
         exception = kwargs.get("exception")
+
         logger.warning(
             "llm_call_failed call_site=%s model=%s latency_ms=%.0f error=%s",
-            _call_site(kwargs),
-            kwargs.get("model"),
-            (end_time - start_time).total_seconds() * 1000,
+            call_site,
+            model,
+            latency_seconds * 1000,
             exception,
         )
+
+        labels = {"call_site": call_site, "model": model, "user_id": user_id}
+        LLM_CALLS_TOTAL.labels(**labels, status="failure").inc()
+        LLM_LATENCY_SECONDS.labels(**labels).observe(latency_seconds)
 
 
 def configure_llm_usage_logging() -> None:
