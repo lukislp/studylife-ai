@@ -53,6 +53,27 @@ def test_build_context_system_message_labels_non_note_content_types() -> None:
     assert "[3] Goal: Lineare Algebra goal\nCourse goal: ..." in message
 
 
+def test_build_context_system_message_instructs_course_name_from_sessions_not_goals() -> None:
+    """Regression test for the 2026-08-12 bug: a live "letzte Woche" answer misattributed the
+    course, opening with an unrelated Goal entry's course name instead of the real Sessions'
+    own course - see docs/decisions.md "Prompt fix: derive course name from Sessions, skip
+    empty days"."""
+    message = build_context_system_message([])
+
+    assert "take the course name" in message
+    assert "from the Session entries themselves" in message
+    assert "never from an unrelated Course or Goal entry" in message
+
+
+def test_build_context_system_message_instructs_skipping_days_without_data() -> None:
+    """Regression test: a live "letzten Monat" answer padded days with no Session entry with
+    fabricated "Keine Daten verfügbar" lines instead of omitting them."""
+    message = build_context_system_message([])
+
+    assert "only mention the days that" in message
+    assert "do not list, enumerate, or note" in message
+
+
 def test_build_context_system_message_handles_no_chunks() -> None:
     message = build_context_system_message([])
 

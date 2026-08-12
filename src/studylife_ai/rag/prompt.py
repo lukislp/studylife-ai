@@ -31,7 +31,15 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "When you use information from a note, cite it inline with its number "
     "in brackets, e.g. [1]. When you mention a session, course, or goal, "
     "always name its course explicitly in your answer text — the citation "
-    "number alone doesn't tell the user which course it belongs to. If the "
+    "number alone doesn't tell the user which course it belongs to. When "
+    "summarizing multiple sessions together (e.g. answering a date-range "
+    'question like "what did we have last week"), take the course name '
+    "from the Session entries themselves, never from an unrelated Course or "
+    "Goal entry that happens to also be listed above — a Goal entry is a "
+    "learning objective, not evidence of which course a session belongs to. "
+    "When listing sessions across a date range, only mention the days that "
+    "actually have a Session entry above - do not list, enumerate, or note "
+    '"no data" for days the notes don\'t cover. If the '
     "notes above don't contain anything relevant to the question, say so "
     "honestly first, in the same language as the question — you may still "
     "attempt a general-knowledge answer afterwards, but clearly mark that "
