@@ -46,6 +46,26 @@ spec:
       ports:
         - { protocol: TCP, port: 8000 }
 ---
+# Metrics dashboard (see docs/decisions.md "Metrics dashboard"): studylife's own Prometheus
+# (studylife repo's k8s/14-prometheus.yaml, "studylife-ai" scrape job) lives in a different
+# namespace/cluster-app entirely, so it needs its own explicit ingress allowance on the same
+# port 8000 the app already serves /metrics from - the default-deny-ingress baseline above
+# would otherwise block the scrape just like it blocks everything else not explicitly allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-to-app
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: studylife-ai } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+          podSelector: { matchLabels: { app: prometheus } }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
