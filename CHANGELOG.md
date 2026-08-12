@@ -1,3 +1,10 @@
+## [1.6.2](https://github.com/lukislp/studylife-ai/compare/v1.6.1...v1.6.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** exempt exact date-range matches from the shared retrieval_top_k ([7e3a485](https://github.com/lukislp/studylife-ai/commit/7e3a4858b639badbb9a16b0bd1bae20d8c464dff))
+
 ## [1.6.1](https://github.com/lukislp/studylife-ai/compare/v1.6.0...v1.6.1) (2026-08-12)
 
 
