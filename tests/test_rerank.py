@@ -178,6 +178,36 @@ async def test_rerank_chunks_passes_reasoning_effort_when_configured(
     assert captured["reasoning_effort"] == "minimal"
 
 
+async def test_rerank_chunks_omits_temperature_for_reasoning_models(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test for a 2026-08-13 production incident: OpenAI's gpt-5 family rejects
+    temperature=0.0 outright ("only temperature=1 is supported"), which made every single
+    rerank call with RERANK_MODEL=gpt-5-mini raise and silently fall back to plain
+    vector-search order - reranking was completely inert in prod until this fix."""
+    captured: dict[str, object] = {}
+
+    async def fake_complete_chat(messages: list[object], **kwargs: object) -> str:
+        captured.update(kwargs)
+        return "0,1"
+
+    monkeypatch.setattr(rerank_module, "complete_chat", fake_complete_chat)
+
+    await rerank_chunks(
+        "query",
+        [_chunk(1, "A", "..."), _chunk(2, "B", "...")],
+        model="openai/gpt-5-mini",
+        api_base=None,
+        timeout=30.0,
+        today=date(2026, 8, 11),
+        reasoning_effort="minimal",
+    )
+
+    assert captured["temperature"] is None
+
+    assert captured["reasoning_effort"] == "minimal"
+
+
 async def test_rerank_chunks_returns_unchanged_for_single_or_no_chunk(
     monkeypatch: MonkeyPatch,
 ) -> None:

@@ -146,7 +146,14 @@ async def rerank_chunks(
     date got different answers (once correct, once not), because nothing kept
     the model's sampling consistent call to call. Reranking a fixed pool by a
     fixed prompt should be a deterministic operation; leaving temperature at
-    the provider default made it needlessly a coin flip.
+    the provider default made it needlessly a coin flip. EXCEPT for reasoning
+    models (`reasoning_effort` set): found live (2026-08-13) that OpenAI's
+    gpt-5 family flatly rejects `temperature=0.0` ("only temperature=1 is
+    supported"), which made every single rerank call raise and silently fall
+    back to plain vector-search order - the temperature-pinning fix and
+    reasoning-model support are mutually exclusive for this model family, so
+    temperature is omitted entirely (not just set to 1) whenever
+    `reasoning_effort` is configured, deferring to the model's own default.
 
     `reasoning_effort` (only relevant for reasoning models like `gpt-5-mini`)
     is passed straight through to `complete_chat` - `None` (the default) is
@@ -164,7 +171,7 @@ async def rerank_chunks(
             timeout=timeout,
             call_site="rerank",
             user_id=user_id,
-            temperature=0.0,
+            temperature=None if reasoning_effort else 0.0,
             reasoning_effort=reasoning_effort,
         )
     except Exception:
