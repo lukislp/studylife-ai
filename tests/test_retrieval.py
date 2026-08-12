@@ -6,6 +6,7 @@ from pytest import MonkeyPatch
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.rag import retrieval as retrieval_module
+from studylife_ai.rag.date_parse import DateRange
 from studylife_ai.rag.retrieval import _fetch_session_window, _fetch_sessions, retrieve_with_rerank
 
 
@@ -17,6 +18,7 @@ def _settings(**overrides: object) -> Settings:
         "rerank_model": None,
         "session_window_days": 14,
         "session_window_top_k": 20,
+        "date_parse_model": None,
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -97,6 +99,7 @@ async def test_fetch_sessions_merges_window_and_topic_pools_deduped_by_entity_id
     store.get_sessions_in_window = fake_get_sessions_in_window
 
     result = await _fetch_sessions(
+        "query",
         [0.1, 0.2],
         store=store,
         user_id="primary",
@@ -171,6 +174,7 @@ async def test_fetch_sessions_uses_session_window_top_k_not_the_shared_per_type_
     store = AsyncMock()
 
     await _fetch_sessions(
+        "query",
         [0.1, 0.2],
         store=store,
         user_id="primary",
@@ -180,6 +184,108 @@ async def test_fetch_sessions_uses_session_window_top_k_not_the_shared_per_type_
     )
 
     assert captured["top_k"] == 20
+
+
+async def test_fetch_sessions_uses_parsed_date_range_instead_of_fixed_window(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When date_parse_model is set and parse_date_range() resolves a range, the window leg must
+    use that exact range instead of the fixed +-session_window_days window - see docs/decisions.md
+    "NL date-range resolution"."""
+    window_calls: list[dict[str, object]] = []
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        window_calls.append(kwargs)
+        return []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_parse_date_range(query: str, **kwargs: object) -> DateRange:
+        return DateRange(date(2026, 8, 3), date(2026, 8, 9))
+
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    monkeypatch.setattr(retrieval_module, "parse_date_range", fake_parse_date_range)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    await _fetch_sessions(
+        "letzte Woche",
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(date_parse_model="openai/gpt-4o"),
+        today=date(2026, 8, 12),
+        top_k=5,
+    )
+
+    assert len(window_calls) == 1
+    assert window_calls[0]["start"] == datetime(2026, 8, 3, 0, 0, 0)
+    assert window_calls[0]["end"] == datetime(2026, 8, 9, 23, 59, 59, 999999)
+
+
+async def test_fetch_sessions_skips_date_parsing_when_date_parse_model_unset(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_parse_date_range(query: str, **kwargs: object) -> DateRange:
+        raise AssertionError("parse_date_range must not be called when date_parse_model is unset")
+
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    monkeypatch.setattr(retrieval_module, "parse_date_range", fake_parse_date_range)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    await _fetch_sessions(
+        "letzte Woche",
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(date_parse_model=None),
+        today=date(2026, 8, 12),
+        top_k=5,
+    )
+
+
+async def test_fetch_sessions_falls_back_to_fixed_window_when_parsing_returns_none(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    window_calls: list[dict[str, object]] = []
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        window_calls.append(kwargs)
+        return []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    async def fake_parse_date_range(query: str, **kwargs: object) -> DateRange | None:
+        return None
+
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    monkeypatch.setattr(retrieval_module, "parse_date_range", fake_parse_date_range)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    await _fetch_sessions(
+        "was haben wir in Analysis behandelt?",
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(date_parse_model="openai/gpt-4o", session_window_days=14),
+        today=date(2026, 8, 12),
+        top_k=5,
+    )
+
+    assert len(window_calls) == 1
+    start, end = window_calls[0]["start"], window_calls[0]["end"]
+    assert isinstance(start, datetime) and isinstance(end, datetime)
+    assert (end - start).days == 28
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(

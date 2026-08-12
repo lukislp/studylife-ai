@@ -20,12 +20,13 @@ range filter isn't.
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import get_args
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import ContentType, QdrantStore, RetrievedChunk
 from studylife_ai.llm.embeddings import embed_texts
+from studylife_ai.rag.date_parse import DateRange, parse_date_range
 from studylife_ai.rag.rerank import rerank_chunks
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,13 @@ def _days_from_today(session_start: str | None, *, today: date) -> int:
 
 
 async def _fetch_session_window(
-    store: QdrantStore, *, user_id: str, window_days: int, today: date, top_k: int
+    store: QdrantStore,
+    *,
+    user_id: str,
+    window_days: int,
+    today: date,
+    top_k: int,
+    date_range: DateRange | None = None,
 ) -> list[RetrievedChunk]:
     """Same never-raises contract as `_search_by_vector` above, for `get_sessions_in_window()`.
 
@@ -82,14 +89,23 @@ async def _fetch_session_window(
     on tomorrow" query, purely via this position effect). Truncating by proximity, not scroll
     order, means an overflow drops the FARTHEST-out window days first, not the nearest ones that
     matter most for near-term queries.
+
+    `date_range`, when given (settings.date_parse_model resolved it for this specific query -
+    see `_fetch_sessions()` and rag/date_parse.py), replaces the fixed +-`window_days`
+    computation with that exact range - everything downstream (the scroll call, the
+    proximity-to-today sort, the `top_k` cap) is unchanged either way, so a resolved range gets
+    the same "closest-to-today survives an overflow" truncation behavior a fixed window already
+    had, not a parallel code path.
     """
-    now = datetime.now()
+    if date_range is not None:
+        start = datetime.combine(date_range.start, time.min)
+        end = datetime.combine(date_range.end, time.max)
+    else:
+        now = datetime.now()
+        start = now - timedelta(days=window_days)
+        end = now + timedelta(days=window_days)
     try:
-        chunks = await store.get_sessions_in_window(
-            user_id=user_id,
-            start=now - timedelta(days=window_days),
-            end=now + timedelta(days=window_days),
-        )
+        chunks = await store.get_sessions_in_window(user_id=user_id, start=start, end=end)
     except Exception:
         logger.exception("Qdrant session-window scroll failed")
         return []
@@ -98,6 +114,7 @@ async def _fetch_session_window(
 
 
 async def _fetch_sessions(
+    query: str,
     vector: list[float],
     *,
     store: QdrantStore,
@@ -112,18 +129,46 @@ async def _fetch_sessions(
     Merged and deduped by `entity_id`, window pool first (it's the one actually relevant to
     date-specific questions, which is the common case this whole design targets). The window leg
     uses `settings.session_window_top_k`, not the shared per-type `top_k` passed in here - see
-    that setting's docstring for why it needs its own, larger budget."""
-    window_chunks, topic_chunks = await asyncio.gather(
-        _fetch_session_window(
-            store,
-            user_id=user_id,
-            window_days=settings.session_window_days,
+    that setting's docstring for why it needs its own, larger budget.
+
+    When `settings.date_parse_model` is set, also resolves `query`'s date expression (if any)
+    via `parse_date_range()` and, when found, feeds it to the window leg in place of the fixed
+    +-session_window_days window - the escalation path named and deferred in docs/decisions.md
+    "Structured session dates" (option (2)), needed because the fixed window's per-passage
+    day-offset labels have no week/month-range framing for a question like "letzte Woche" (see
+    docs/decisions.md "NL date-range resolution"). Unset (the default), a `None` resolution
+    result, or a parse-call failure all take the exact same path as before this feature existed
+    - zero behavior change, same convention as `rerank_model`. Resolved concurrently with the
+    topic-vector leg (independent of it) rather than serially before everything, to keep this
+    opt-in feature's added latency to "however long the slower of the two legs takes," not
+    "date-parse latency + everything else."
+    """
+
+    async def _resolve_date_range() -> DateRange | None:
+        if not settings.date_parse_model:
+            return None
+        return await parse_date_range(
+            query,
+            model=settings.date_parse_model,
+            api_base=settings.llm_api_base,
+            timeout=settings.llm_request_timeout_seconds,
             today=today,
-            top_k=settings.session_window_top_k,
-        ),
+            user_id=user_id,
+        )
+
+    date_range, topic_chunks = await asyncio.gather(
+        _resolve_date_range(),
         _search_by_vector(
             vector, store=store, user_id=user_id, top_k=top_k, content_type="session"
         ),
+    )
+    window_chunks = await _fetch_session_window(
+        store,
+        user_id=user_id,
+        window_days=settings.session_window_days,
+        today=today,
+        top_k=settings.session_window_top_k,
+        date_range=date_range,
     )
     seen_ids = {c.entity_id for c in window_chunks}
     return window_chunks + [c for c in topic_chunks if c.entity_id not in seen_ids]
@@ -180,6 +225,7 @@ async def retrieve_with_rerank(
         results = await asyncio.gather(
             *(
                 _fetch_sessions(
+                    query,
                     vector,
                     store=store,
                     user_id=user_id,
