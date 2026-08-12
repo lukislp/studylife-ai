@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/lukislp/studylife-ai/compare/v1.4.0...v1.5.0) (2026-08-12)
+
+
+### Features
+
+* add Prometheus metrics for LLM cost/latency/tokens per user ([38b4194](https://github.com/lukislp/studylife-ai/commit/38b419443d5be179a80955e5fddb28b0d6bdc454))
+
 # [1.4.0](https://github.com/lukislp/studylife-ai/compare/v1.3.6...v1.4.0) (2026-08-11)
 
 
