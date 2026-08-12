@@ -1,3 +1,11 @@
+# [1.6.0](https://github.com/lukislp/studylife-ai/compare/v1.5.2...v1.6.0) (2026-08-12)
+
+
+### Features
+
+* **rag:** add NL date-range resolution module and its settings knob ([76d9959](https://github.com/lukislp/studylife-ai/commit/76d9959e52a860c7ecbe8fe42032c10416d637e8))
+* **rag:** wire date-range resolution into session retrieval ([58e792b](https://github.com/lukislp/studylife-ai/commit/58e792be095f1d0ea90738f19a1ffea1cf704b50))
+
 ## [1.5.2](https://github.com/lukislp/studylife-ai/compare/v1.5.1...v1.5.2) (2026-08-12)
 
 
