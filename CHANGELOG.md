@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/lukislp/studylife-ai/compare/v1.8.0...v1.9.0) (2026-08-12)
+
+
+### Features
+
+* **llm:** add reasoning_effort support for the reranker ([5fdd0de](https://github.com/lukislp/studylife-ai/commit/5fdd0de2f50c101bcc50bd4c34f02478f3bbd264))
+
 # [1.8.0](https://github.com/lukislp/studylife-ai/compare/v1.7.1...v1.8.0) (2026-08-12)
 
 
