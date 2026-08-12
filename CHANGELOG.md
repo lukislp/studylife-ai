@@ -1,3 +1,10 @@
+## [1.6.4](https://github.com/lukislp/studylife-ai/compare/v1.6.3...v1.6.4) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** instruct the answering LLM to list every session, no truncation ([39d683e](https://github.com/lukislp/studylife-ai/commit/39d683ea2c054ba678178af222a6e1844df5bfef))
+
 ## [1.6.3](https://github.com/lukislp/studylife-ai/compare/v1.6.2...v1.6.3) (2026-08-12)
 
 
