@@ -209,6 +209,17 @@ llm_call call_site=chat model=gpt-4o-mini latency_ms=1281 prompt_tokens=153 comp
 
 `call_site` (`chat`, `agent`, `rerank`, `retrieval`, `ingestion`, `eval`, `eval-fixture`, `eval-judge`) is pure logging metadata passed to LiteLLM per call - it never reaches the model. `cost_usd` comes straight from LiteLLM's own price-map lookup (`0.0` for local Ollama models, since there's nothing to price). A failed call logs `llm_call_failed` at `WARNING` with the same fields plus the exception, instead of silently disappearing.
 
+The same callback also records the identical data as Prometheus metrics (`llm/metrics.py`), plus a `user_id` label (StudyLife's own numeric auth user id) not present in the log line - see [docs/decisions.md](docs/decisions.md) "Metrics dashboard". Exposed at `GET /metrics` (via `prometheus-fastapi-instrumentator`, which also auto-instruments plain HTTP request rate/latency/status per endpoint):
+
+| Metric | Type | Labels | Shows |
+|---|---|---|---|
+| `studylife_ai_llm_calls_total` | Counter | `call_site`, `model`, `user_id`, `status` | Call volume, success vs. failure |
+| `studylife_ai_llm_cost_usd_total` | Counter | `call_site`, `model`, `user_id` | Cumulative cost - `sum by (user_id) (...)` answers "who spent what" |
+| `studylife_ai_llm_latency_seconds` | Histogram | `call_site`, `model`, `user_id` | p50/p95/p99 latency |
+| `studylife_ai_llm_prompt_tokens_total` / `..._completion_tokens_total` | Counter | `call_site`, `model`, `user_id` | Token usage |
+
+Scraped by the existing self-hosted Prometheus in the StudyLife repo (`k8s/14-prometheus.yaml`, `job_name: studylife-ai`) and visualized in its own Grafana folder ("StudyLife AI", `k8s/17b-grafana-dashboards.yaml`) - deliberately separate from the main "StudyLife" dashboard folder, since this is a different service with its own repo/release cycle.
+
 ## Deployment
 
 k3s manifests live under [`k8s/`](k8s/): a dedicated `studylife-ai` namespace, an in-cluster Qdrant (`03-qdrant.yaml`), the service itself (`04-app.yaml`, non-root, PVC-backed for `REGISTERED_KEYS_DB_PATH`/`AGENT_CHECKPOINT_DB_PATH`), and default-deny `NetworkPolicy`s that only let StudyLife's own backend reach it (`05-network-policies.yaml`) - matching the M4.5 design where only StudyLife's backend ever calls this service, never a browser directly.
@@ -227,6 +238,7 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **Rate limiting** — the piece deferred out of M5. Fixed-window, per-user, in-memory (single-replica deployment, so no shared state needed) — see [docs/decisions.md](docs/decisions.md) "Rate limiting".
 - [x] **M6** — Documentation polish, architecture diagram ([Architecture](#architecture)), demo material ([docs/demo.md](docs/demo.md)).
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
+- [x] **Metrics dashboard** — LLM cost/latency/token Prometheus metrics, per-user cost attribution, scraped by the existing self-hosted Prometheus and visualized in its own Grafana folder (see [Observability](#observability) and [docs/decisions.md](docs/decisions.md) "Metrics dashboard").
 
 ## Tech stack
 
