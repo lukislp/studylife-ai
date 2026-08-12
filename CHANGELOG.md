@@ -1,3 +1,10 @@
+## [1.9.3](https://github.com/lukislp/studylife-ai/compare/v1.9.2...v1.9.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* **config:** revert RERANK_MODEL to gpt-4o ([8696e4d](https://github.com/lukislp/studylife-ai/commit/8696e4df4efae686cd2103cb2490a3b4611e5b74))
+
 ## [1.9.2](https://github.com/lukislp/studylife-ai/compare/v1.9.1...v1.9.2) (2026-08-12)
 
 
