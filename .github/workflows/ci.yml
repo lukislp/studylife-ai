@@ -85,7 +85,11 @@ jobs:
           echo "No releasable commits since the last tag (e.g. docs/ci/chore-only) - this is the expected, common case with Conventional Commits, not a failure. docker/trivy/semantic-release below skip themselves via needs.get-version.outputs.published." | tee -a "$GITHUB_STEP_SUMMARY"
 
   docker:
-    needs: [get-version]
+    # Runs after semantic-release (not before, see that job) - so a build/push failure here
+    # never leaves an orphaned, un-tagged GHCR image blocking every future release via the
+    # duplicate-tag guard below (the exact incident already hit this repo once - see the
+    # 2026-08-11 "CI incident" entry in docs/decisions.md).
+    needs: [get-version, semantic-release]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -142,7 +146,9 @@ jobs:
           exit-code: "0"
 
   semantic-release:
-    needs: [get-version, docker]
+    # Runs before docker (see that job's comment) - the real tag/release must exist before
+    # anything is published under that version.
+    needs: [get-version]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
