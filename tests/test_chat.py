@@ -59,6 +59,33 @@ async def test_chat_streams_llm_deltas_and_sources_as_sse(
     assert calls[0]["metadata"] == {"call_site": "chat", "user_id": TEST_USER_ID}
 
 
+async def test_chat_passes_reasoning_effort_when_configured(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Regression test: reasoning models (e.g. gpt-5) spend real, billed tokens "thinking"
+    before any visible output unless reasoning_effort is set - see docs/decisions.md."""
+    from studylife_ai import config as config_module
+
+    calls = []
+
+    async def fake_acompletion(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return _make_fake_stream(["Hello"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+    settings = config_module.get_settings()
+    monkeypatch.setattr(
+        "studylife_ai.api.chat.get_settings",
+        lambda: settings.model_copy(update={"llm_reasoning_effort": "minimal"}),
+    )
+
+    response = await client.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
+
+    assert response.status_code == 200
+    assert calls[0]["reasoning_effort"] == "minimal"
+
+
 async def test_chat_streams_error_event_on_llm_failure(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:

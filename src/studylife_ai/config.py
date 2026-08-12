@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     llm_model: str = "ollama/llama3.2"
     llm_api_base: str | None = "http://localhost:11434"
     llm_request_timeout_seconds: float = 60.0
+    # For reasoning models only (e.g. OpenAI's gpt-5 family) - "minimal"/"low"/"medium"/"high".
+    # Unset (the default) omits the parameter entirely, which is correct for non-reasoning models
+    # (ollama/llama3.2, gpt-4o, ...) - passing it there would just be ignored/rejected by most
+    # providers. Found live (2026-08-12): a reasoning model with no reasoning_effort set spends
+    # real, billed completion tokens "thinking" before any visible output - a trivial one-word
+    # reply burned 64 hidden reasoning tokens - "minimal" eliminates that overhead entirely.
+    llm_reasoning_effort: str | None = None
 
     # StudyLife REST API. One shared instance URL for all users (see
     # docs/decisions.md "M4.5 Multi-user support") — no default, ingestion

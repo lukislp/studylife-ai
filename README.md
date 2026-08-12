@@ -108,6 +108,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `LOG_LEVEL`                    | `INFO`                    | Python logging level.                                                       |
 | `LLM_MODEL`                    | `ollama/llama3.2`         | LiteLLM model identifier; selects provider and model, e.g. `openai/gpt-4o-mini`. |
 | `LLM_API_BASE`                 | `http://localhost:11434`  | Base URL for self-hosted model backends (e.g. Ollama). Unused for most API providers. |
+| `LLM_REASONING_EFFORT`         | _(unset)_                 | Only for reasoning models (e.g. OpenAI's `gpt-5` family) — `minimal`/`low`/`medium`/`high`. Unset = omitted, correct for non-reasoning models. See [docs/decisions.md](docs/decisions.md). |
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
 | `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyLife instance, e.g. `http://localhost:8080`. One shared instance for all users. Required for ingestion and `/agent` (not `/chat`, which never calls StudyLife's API). |
