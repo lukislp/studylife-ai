@@ -43,7 +43,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-ai
-          image: ghcr.io/lukislp/studylife-ai:1.6.5 # {"$imagepolicy": "flux-system:studylife-ai"}
+          image: ghcr.io/lukislp/studylife-ai:1.6.6 # {"$imagepolicy": "flux-system:studylife-ai"}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
