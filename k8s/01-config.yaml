@@ -38,7 +38,7 @@ data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
 
-  LLM_MODEL: "openai/gpt-4o-mini"
+  LLM_MODEL: "openai/gpt-4o"
   LLM_API_BASE: ""
   LLM_REQUEST_TIMEOUT_SECONDS: "60"
 
