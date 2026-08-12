@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/lukislp/studylife-ai/compare/v1.7.0...v1.7.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** stop the answering LLM from offering actions /chat can't take ([39c0d75](https://github.com/lukislp/studylife-ai/commit/39c0d75e2a2999894d4a1d5dd6ee8a4f1b462c42))
+
 # [1.7.0](https://github.com/lukislp/studylife-ai/compare/v1.6.6...v1.7.0) (2026-08-12)
 
 
