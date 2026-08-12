@@ -124,6 +124,7 @@ async def rerank_chunks(
     timeout: float,
     today: date,
     user_id: str = "unknown",
+    reasoning_effort: str | None = None,
 ) -> list[RetrievedChunk]:
     """Reorders `chunks` most-to-least relevant to `query`. Never raises -
     a bad or missing rerank result degrades to the original vector-search
@@ -146,6 +147,10 @@ async def rerank_chunks(
     the model's sampling consistent call to call. Reranking a fixed pool by a
     fixed prompt should be a deterministic operation; leaving temperature at
     the provider default made it needlessly a coin flip.
+
+    `reasoning_effort` (only relevant for reasoning models like `gpt-5-mini`)
+    is passed straight through to `complete_chat` - `None` (the default) is
+    stripped by LiteLLM, correct for non-reasoning `model`s.
     """
     if len(chunks) <= 1:
         return chunks
@@ -160,6 +165,7 @@ async def rerank_chunks(
             call_site="rerank",
             user_id=user_id,
             temperature=0.0,
+            reasoning_effort=reasoning_effort,
         )
     except Exception:
         logger.exception("Reranking failed, falling back to vector-search order")

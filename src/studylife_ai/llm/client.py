@@ -57,15 +57,19 @@ async def complete_chat(
     call_site: str = "unknown",
     user_id: str = "unknown",
     temperature: float | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Non-streaming chat completion - returns the full response text at
-    once. Used for reranking (rag/rerank.py), which needs one parseable
-    response, not a token stream. `call_site`/`user_id` are pure logging
-    metadata (see `llm/logging.py` and `llm/metrics.py`) - neither ever
-    reaches the model. `temperature=None` (the default) omits the parameter
-    entirely, leaving the provider's own default in place - LiteLLM strips
-    `None` completion kwargs before sending the request, so this is
-    equivalent to not passing it at all."""
+    once. Used for reranking (rag/rerank.py) and date-range parsing
+    (rag/date_parse.py), which need one parseable response, not a token
+    stream. `call_site`/`user_id` are pure logging metadata (see
+    `llm/logging.py` and `llm/metrics.py`) - neither ever reaches the
+    model. `temperature=None`/`reasoning_effort=None` (the defaults) omit
+    those parameters entirely, leaving the provider's own default in place -
+    LiteLLM strips `None` completion kwargs before sending the request, so
+    this is equivalent to not passing them at all. `reasoning_effort` only
+    matters for reasoning models (e.g. `RERANK_MODEL=openai/gpt-5-mini`) -
+    see `Settings.llm_reasoning_effort`'s docstring for why it's needed."""
     response = await litellm.acompletion(
         model=model,
         messages=[m.model_dump() for m in messages],
@@ -73,6 +77,7 @@ async def complete_chat(
         timeout=timeout,
         stream=False,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
         metadata={"call_site": call_site, "user_id": user_id},
     )
     return response.choices[0].message.content or ""

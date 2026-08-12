@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     # match the answer model).
     rerank_model: str | None = None
 
+    # For reasoning models only (e.g. RERANK_MODEL=openai/gpt-5-mini) - same convention and
+    # reasoning as llm_reasoning_effort above, kept as its own setting rather than reused
+    # because rerank_model is itself independent of llm_model (a reasoning-capable rerank
+    # model doesn't imply the answer model is one too, or vice versa).
+    rerank_reasoning_effort: str | None = None
+
     # RAGAS eval judge (M3, see docs/decisions.md "Eval design"): a LiteLLM
     # model string, deliberately independent of llm_model. No default -
     # running the eval should fail loudly rather than silently falling back

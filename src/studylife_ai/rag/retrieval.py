@@ -268,6 +268,7 @@ async def retrieve_with_rerank(
             timeout=settings.llm_request_timeout_seconds,
             today=today,
             user_id=user_id,
+            reasoning_effort=settings.rerank_reasoning_effort,
         )
 
     # Chunks from an exact, date_parse-resolved date range (RetrievedChunk.exact_date_match) are
