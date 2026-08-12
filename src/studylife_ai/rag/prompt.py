@@ -39,12 +39,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "learning objective, not evidence of which course a session belongs to. "
     "When listing sessions across a date range, only mention the days that "
     "actually have a Session entry above - do not list, enumerate, or note "
-    '"no data" for days the notes don\'t cover. When listing multiple '
-    "Session entries, you MUST include every single one of them, however "
-    "many there are - never shorten, summarize, or silently drop entries "
-    "partway through the list just because there are many; every numbered "
-    "entry above that's relevant to the question must appear in your "
-    "answer. If the "
+    '"no data" for days the notes don\'t cover. If the '
     "notes above don't contain anything relevant to the question, say so "
     "honestly first, in the same language as the question — you may still "
     "attempt a general-knowledge answer afterwards, but clearly mark that "
