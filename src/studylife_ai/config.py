@@ -82,6 +82,17 @@ class Settings(BaseSettings):
     # leg's candidate count, not the topic-vector fallback or the other content types' quotas.
     session_window_top_k: int = 20
 
+    # Optional NL date-range resolution for session retrieval (see docs/decisions.md "NL
+    # date-range resolution" - the escalation path (2) named and deferred in "Structured session
+    # dates"). Unset by default (opt-in, same convention as rerank_model/eval_judge_model): when
+    # unset, session retrieval keeps its current fixed +-session_window_days window unchanged for
+    # every query. When set, a dedicated LLM call (rag/date_parse.py) tries to resolve the
+    # query's own date/date-range expression (e.g. "letzte Woche") before retrieval; when it
+    # finds one, that exact range replaces the fixed window for THAT query only - queries with no
+    # date expression, or when this is unset, are unaffected. Deliberately independent of
+    # llm_model/rerank_model, same pattern as every other model concern here.
+    date_parse_model: str | None = None
+
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.
     embedding_model: str = "ollama/nomic-embed-text"
