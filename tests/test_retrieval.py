@@ -16,6 +16,7 @@ def _settings(**overrides: object) -> Settings:
         "rerank_candidate_k": 20,
         "rerank_model": None,
         "session_window_days": 14,
+        "session_window_top_k": 20,
     }
     defaults.update(overrides)
     return Settings(**defaults)  # type: ignore[arg-type]
@@ -148,6 +149,37 @@ async def test_fetch_session_window_caps_to_top_k_keeping_the_nearest_days(
     # Only the 2 nearest-to-today survive (today, tomorrow) - "3 days ago" and "5 days out" are
     # dropped, not kept, even though "3 days ago" arrived earlier in the unsorted input.
     assert [c.title for c in result] == ["today", "tomorrow"]
+
+
+async def test_fetch_sessions_uses_session_window_top_k_not_the_shared_per_type_quota(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test: the window leg must use settings.session_window_top_k, not the smaller
+    per-type `top_k` passed in for the topic-vector leg - otherwise a busy nearby day can still
+    fill the shared quota and starve an equally-near day (see session_window_top_k's docstring)."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_session_window(store: object, **kwargs: object) -> list[RetrievedChunk]:
+        captured.update(kwargs)
+        return []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return []
+
+    monkeypatch.setattr(retrieval_module, "_fetch_session_window", fake_fetch_session_window)
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    store = AsyncMock()
+
+    await _fetch_sessions(
+        [0.1, 0.2],
+        store=store,
+        user_id="primary",
+        settings=_settings(session_window_top_k=20),
+        today=date(2026, 8, 12),
+        top_k=5,  # the shared per-type quota - must NOT be what the window leg receives
+    )
+
+    assert captured["top_k"] == 20
 
 
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(

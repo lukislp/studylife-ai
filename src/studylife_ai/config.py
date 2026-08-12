@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     # last year") - those still go through the separate, unwindowed vector-search fallback.
     session_window_days: int = 14
 
+    # Cap on how many session chunks _fetch_session_window() keeps from that date-window scroll
+    # (see docs/decisions.md "Session window capacity"). Deliberately its own setting, not the
+    # shared per-content-type quota (rerank_candidate_k // 4) - a busy day (several sessions) was
+    # able to fill that shared quota entirely and starve an equally-near day, confirmed live
+    # 2026-08-12 ("vorgestern" lost out to "gestern"). Set well above what the shared quota would
+    # give (was effectively 5) so several busy nearby days can all fit; only affects the window
+    # leg's candidate count, not the topic-vector fallback or the other content types' quotas.
+    session_window_top_k: int = 20
+
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.
     embedding_model: str = "ollama/nomic-embed-text"

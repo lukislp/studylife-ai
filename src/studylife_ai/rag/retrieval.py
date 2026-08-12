@@ -110,14 +110,16 @@ async def _fetch_sessions(
     ALL sessions (same `top_k` quota every other content type gets) so a question like "what did
     we cover in Analysis last year" - no near-term date in it at all - still finds something.
     Merged and deduped by `entity_id`, window pool first (it's the one actually relevant to
-    date-specific questions, which is the common case this whole design targets)."""
+    date-specific questions, which is the common case this whole design targets). The window leg
+    uses `settings.session_window_top_k`, not the shared per-type `top_k` passed in here - see
+    that setting's docstring for why it needs its own, larger budget."""
     window_chunks, topic_chunks = await asyncio.gather(
         _fetch_session_window(
             store,
             user_id=user_id,
             window_days=settings.session_window_days,
             today=today,
-            top_k=top_k,
+            top_k=settings.session_window_top_k,
         ),
         _search_by_vector(
             vector, store=store, user_id=user_id, top_k=top_k, content_type="session"
