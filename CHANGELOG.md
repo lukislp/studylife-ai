@@ -1,3 +1,10 @@
+## [1.9.2](https://github.com/lukislp/studylife-ai/compare/v1.9.1...v1.9.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **rag:** stop pinning temperature=0.0 for reasoning rerank models ([22e80cc](https://github.com/lukislp/studylife-ai/commit/22e80cc5d079b56168fa72a1fe15cdc792ae01c2))
+
 ## [1.9.1](https://github.com/lukislp/studylife-ai/compare/v1.9.0...v1.9.1) (2026-08-12)
 
 
