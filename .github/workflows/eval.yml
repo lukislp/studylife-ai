@@ -1,0 +1,83 @@
+name: Eval
+
+# Split out of ci.yml (docs/decisions.md "eval split into its own workflow to fix the
+# lint/test self-collision race") - this job takes ~25-30min and calls a paid judge model,
+# so it must never share ci.yml's release-chain concurrency lock (would either block every
+# push behind an unrelated eval run, or - the bug this split actually fixes - collide with
+# ci.yml's own lint/test jobs for the same lock and get silently cancelled). Running as its
+# own workflow file gives it an entirely independent concurrency scope for free.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  changes:
+    # Cheap pre-check so `eval` (see below) doesn't run its full pass on every push - only
+    # when a push actually touched something that could affect the RAG pipeline
+    # (docs/decisions.md "Eval CI trigger scoped to relevant paths"). No third-party
+    # paths-filter action - a plain `git diff` against the pre-push SHA needs no new dependency
+    # and is easy to read. `github.event.before` (not just the latest commit) covers multi-commit
+    # pushes correctly; a first-push-to-branch `before` of all zeros has no real "before" to diff
+    # against, so it defaults to running eval rather than silently skipping it.
+    runs-on: ubuntu-latest
+    outputs:
+      eval-relevant: ${{ steps.filter.outputs.eval-relevant }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" \
+              | grep -qE '^(src/studylife_ai/(rag|ingestion|llm|agent|eval|studylife|schemas)/|src/studylife_ai/config\.py|eval/)'; then
+            echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eval-relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  eval:
+    # Only on push to main, not on every PR commit (docs/decisions.md "M3 eval
+    # design") - this job calls a paid judge model, so its cost should stay
+    # bounded rather than scale with PR activity. No score thresholds yet
+    # either - this just needs to run without raising; the printed scores are
+    # for humans to read in the job log until a real baseline justifies gates.
+    # Also gated on `changes.eval-relevant` (docs/decisions.md "Eval CI trigger
+    # scoped to relevant paths") - a push that only touched docs/k8s/CI itself
+    # can't have changed retrieval/generation behavior, so it skips this job
+    # entirely instead of burning ~25-30min and real judge-LLM cost for nothing.
+    needs: [changes]
+    if: needs.changes.outputs.eval-relevant == 'true'
+    runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+    env:
+      QDRANT_URL: http://localhost:6333
+      QDRANT_COLLECTION: studylife_notes_ci
+      # No local Ollama in CI, so both generation and embeddings use OpenAI
+      # here too - the same judge account/key, see docs/decisions.md.
+      LLM_MODEL: openai/gpt-4o-mini
+      # LLM_API_BASE must be cleared: Settings defaults it to Ollama's URL
+      # (http://localhost:11434), which would force even this OpenAI model
+      # through a custom api_base litellm can't reach in CI.
+      LLM_API_BASE: ""
+      EMBEDDING_MODEL: openai/text-embedding-3-small
+      EVAL_JUDGE_MODEL: openai/gpt-4o-mini
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.5.8"
+          cache-suffix: "eval"
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      # Seeds eval/fixture_notes.jsonl into the empty Qdrant service container
+      # above - CI has no real StudyLife instance to ingest from (see
+      # src/studylife_ai/eval/fixture.py).
+      - run: uv run python -m studylife_ai.eval.seed_fixture
+      - run: uv run python -m studylife_ai.eval | tee "$GITHUB_STEP_SUMMARY"

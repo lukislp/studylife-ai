@@ -5,51 +5,23 @@ on:
     branches: [main]
   pull_request:
 
+# One queue entry per ref (or per PR number, so successive pushes to the same PR don't queue
+# behind each other) - the whole run (lint/test/get-version/docker/trivy/semantic-release) is
+# now a single atomic unit instead of several jobs independently competing for the same
+# job-level lock (docs/decisions.md "eval split into its own workflow to fix the lint/test
+# self-collision race"). Only PR runs get cancelled by a newer push to the same PR
+# (fast feedback); a push-to-main run is never cancelled mid-flight, so a release can't be
+# interrupted partway through.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   IMAGE: ghcr.io/lukislp/studylife-ai
 
 jobs:
-  changes:
-    # Cheap pre-check so `eval` (see below) doesn't run its full ~25-30min, real-money judge-LLM
-    # pass on every push - only when a push actually touched something that could affect the RAG
-    # pipeline (docs/decisions.md "Eval CI trigger scoped to relevant paths"). No third-party
-    # paths-filter action - a plain `git diff` against the pre-push SHA needs no new dependency
-    # and is easy to read. `github.event.before` (not just the latest commit) covers multi-commit
-    # pushes correctly; a first-push-to-branch `before` of all zeros has no real "before" to diff
-    # against, so it defaults to running eval rather than silently skipping it.
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    outputs:
-      eval-relevant: ${{ steps.filter.outputs.eval-relevant }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - id: filter
-        run: |
-          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" \
-              | grep -qE '^(src/studylife_ai/(rag|ingestion|llm|agent|eval|studylife|schemas)/|src/studylife_ai/config\.py|eval/)'; then
-            echo "eval-relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "eval-relevant=false" >> "$GITHUB_OUTPUT"
-          fi
-
   lint:
     runs-on: ubuntu-latest
-    # In the same group as get-version/docker/semantic-release further down, NOT eval/trivy -
-    # closes the version-desync race (docs/decisions.md "CI incident") at its actual root:
-    # two overlapping pushes' lint/test used to run fully in parallel with no ordering
-    # guarantee, so whichever finished first could reach get-version before an earlier push's
-    # own release had actually landed, regardless of push order. Deliberately NOT applied
-    # workflow-wide (tried that first, reverted) - eval takes 25-30 min and has no interaction
-    # with versioning/tagging at all (its Qdrant is a job-scoped ephemeral service container,
-    # never shared across jobs or runs), so gating it behind this group only made every push
-    # wait out an unrelated eval run for no correctness benefit.
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v9.0.0
@@ -64,9 +36,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v9.0.0
@@ -77,51 +46,6 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest
 
-  eval:
-    # Only on push to main, not on every PR commit (docs/decisions.md "M3 eval
-    # design") - this job calls a paid judge model, so its cost should stay
-    # bounded rather than scale with PR activity. No score thresholds yet
-    # either - this just needs to run without raising; the printed scores are
-    # for humans to read in the job log until a real baseline justifies gates.
-    # Also gated on `changes.eval-relevant` (docs/decisions.md "Eval CI trigger
-    # scoped to relevant paths") - a push that only touched docs/k8s/CI itself
-    # can't have changed retrieval/generation behavior, so it skips this job
-    # entirely instead of burning ~25-30min and real judge-LLM cost for nothing.
-    needs: [changes]
-    if: github.event_name == 'push' && needs.changes.outputs.eval-relevant == 'true'
-    runs-on: ubuntu-latest
-    services:
-      qdrant:
-        image: qdrant/qdrant:latest
-        ports:
-          - 6333:6333
-    env:
-      QDRANT_URL: http://localhost:6333
-      QDRANT_COLLECTION: studylife_notes_ci
-      # No local Ollama in CI, so both generation and embeddings use OpenAI
-      # here too - the same judge account/key, see docs/decisions.md.
-      LLM_MODEL: openai/gpt-4o-mini
-      # LLM_API_BASE must be cleared: Settings defaults it to Ollama's URL
-      # (http://localhost:11434), which would force even this OpenAI model
-      # through a custom api_base litellm can't reach in CI.
-      LLM_API_BASE: ""
-      EMBEDDING_MODEL: openai/text-embedding-3-small
-      EVAL_JUDGE_MODEL: openai/gpt-4o-mini
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v9.0.0
-        with:
-          version: "0.5.8"
-          cache-suffix: "eval"
-      - run: uv python install 3.12
-      - run: uv sync --frozen
-      # Seeds eval/fixture_notes.jsonl into the empty Qdrant service container
-      # above - CI has no real StudyLife instance to ingest from (see
-      # src/studylife_ai/eval/fixture.py).
-      - run: uv run python -m studylife_ai.eval.seed_fixture
-      - run: uv run python -m studylife_ai.eval | tee "$GITHUB_STEP_SUMMARY"
-
   # ---------------------------------------------------------------------
   # Version / image / release - push to main only (M5, mirrors studylife's
   # own ci-cd.yml pattern: semantic-release drives the version, Flux picks
@@ -131,9 +55,6 @@ jobs:
     needs: [lint, test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     # @semantic-release/github verifies push/write access as part of its plugin
     # lifecycle even during a dry run - a read-only token fails that check
     # outright. No actual writes happen here regardless: dry_run: true never
@@ -167,9 +88,6 @@ jobs:
     needs: [get-version]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -227,9 +145,6 @@ jobs:
     needs: [get-version, docker]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
-    concurrency:
-      group: studylife-ai-release-chain
-      cancel-in-progress: false
     permissions:
       contents: write
       issues: write
