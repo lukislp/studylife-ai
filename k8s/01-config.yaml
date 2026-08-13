@@ -38,10 +38,10 @@ data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
 
-  LLM_MODEL: "openai/gpt-5-mini"
+  LLM_MODEL: "openai/gpt-5.6-luna"
   LLM_API_BASE: ""
   LLM_REQUEST_TIMEOUT_SECONDS: "60"
-  LLM_REASONING_EFFORT: "minimal"
+  LLM_REASONING_EFFORT: "medium"
 
   # https on the internal Service port, not the http one - StudyLife's own UseHttpsRedirection
   # middleware forces HTTPS unconditionally, even for internal traffic (found live: the http
