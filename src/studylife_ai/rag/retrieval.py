@@ -259,18 +259,6 @@ async def retrieve_with_rerank(
         chunks = [chunk for group in results for chunk in group]
         chunks.sort(key=lambda c: c.score, reverse=True)
 
-    if settings.rerank_model and chunks:
-        chunks = await rerank_chunks(
-            query,
-            chunks,
-            model=settings.rerank_model,
-            api_base=settings.llm_api_base,
-            timeout=settings.llm_request_timeout_seconds,
-            today=today,
-            user_id=user_id,
-            reasoning_effort=settings.rerank_reasoning_effort,
-        )
-
     # Chunks from an exact, date_parse-resolved date range (RetrievedChunk.exact_date_match) are
     # unconditionally relevant to the question - retrieval_top_k exists to approximate relevance
     # under uncertainty (vector similarity), which doesn't apply once a range is exact. They get
@@ -281,4 +269,30 @@ async def retrieve_with_rerank(
     # `exact_matches` is empty and this reduces to today's exact `chunks[:retrieval_top_k]`.
     exact_matches = [c for c in chunks if c.exact_date_match]
     rest = [c for c in chunks if not c.exact_date_match]
+
+    # Reranking only ever runs on `rest`, never on `exact_matches` - split BEFORE reranking, not
+    # after. Their inclusion is already unconditional (see above), so there is no "who deserves
+    # the scarce slot" decision left for a reranker to make; the only relevance question
+    # reranking exists to answer is already answered, deterministically, for these chunks.
+    # Confirmed live 2026-08-13: a "letzte Woche" query with 21 exact-match session chunks (all
+    # near-duplicate - same course/topic, differing only by date/time) merged into the SAME
+    # rerank call as the ~15 chunks that actually needed ranking - every model tried (gpt-4o,
+    # gpt-5, gpt-5-mini) truncated its response partway through that near-duplicate block, most
+    # likely because near-identical content is inherently the hardest case to rank faithfully,
+    # for any model - which starved the reranker's attention away from the chunks whose order
+    # actually mattered for the real retrieval_top_k cut. This never surfaced before the
+    # exact_date_match exemption existed, since session chunks previously competed for the same
+    # small shared top_k as everything else and rarely exceeded a handful per rerank call.
+    if settings.rerank_model and rest:
+        rest = await rerank_chunks(
+            query,
+            rest,
+            model=settings.rerank_model,
+            api_base=settings.llm_api_base,
+            timeout=settings.llm_request_timeout_seconds,
+            today=today,
+            user_id=user_id,
+            reasoning_effort=settings.rerank_reasoning_effort,
+        )
+
     return exact_matches[: settings.date_range_chunk_cap] + rest[: settings.retrieval_top_k]

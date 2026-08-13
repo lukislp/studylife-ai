@@ -401,6 +401,58 @@ async def test_retrieve_with_rerank_exempts_exact_date_matches_from_retrieval_to
     assert len([t for t in result_titles if t.startswith("note-")]) == 2
 
 
+async def test_retrieve_with_rerank_excludes_exact_date_matches_from_reranking(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression test for a 2026-08-13 production incident: exact_date_match chunks used to be
+    reranked along with everything else - a "letzte Woche" query merged 21 near-duplicate exact-
+    match session chunks into the same rerank call as the chunks that actually needed ranking,
+    and every model tried (gpt-4o, gpt-5, gpt-5-mini) truncated its response partway through the
+    near-duplicate block, starving the reranker's attention away from the chunks whose order
+    actually mattered. Their inclusion is already unconditional (see the test above) - there's
+    no relevance decision left for a reranker to make, so they must never reach it."""
+    exact_matches = [
+        _chunk_of_type(i, f"exact-{i}", "session", 0.0, exact_date_match=True) for i in range(21)
+    ]
+    ordinary = [_chunk_of_type(100 + i, f"note-{i}", "note", 0.9 - i * 0.1) for i in range(3)]
+    captured_rerank_input: list[RetrievedChunk] = []
+
+    async def fake_search_by_vector(vector: list[float], **kwargs: object) -> list[RetrievedChunk]:
+        return ordinary if kwargs["content_type"] == "note" else []
+
+    async def fake_get_sessions_in_window(**kwargs: object) -> list[RetrievedChunk]:
+        return exact_matches
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
+        return [[0.1, 0.2]]
+
+    async def fake_rerank_chunks(
+        query: str, chunks: list[RetrievedChunk], **kwargs: object
+    ) -> list[RetrievedChunk]:
+        captured_rerank_input.extend(chunks)
+        return chunks
+
+    monkeypatch.setattr(retrieval_module, "embed_texts", fake_embed_texts)
+    monkeypatch.setattr(retrieval_module, "_search_by_vector", fake_search_by_vector)
+    monkeypatch.setattr(retrieval_module, "rerank_chunks", fake_rerank_chunks)
+    store = AsyncMock()
+    store.get_sessions_in_window = fake_get_sessions_in_window
+
+    await retrieve_with_rerank(
+        "query",
+        store=store,
+        settings=_settings(
+            rerank_model="openai/gpt-4o", retrieval_top_k=8, date_range_chunk_cap=60
+        ),
+        user_id="primary",
+    )
+
+    assert len(captured_rerank_input) == 3
+    assert all(not c.exact_date_match for c in captured_rerank_input)
+
+
 async def test_retrieve_with_rerank_without_model_sorts_merged_pool_by_score(
     monkeypatch: MonkeyPatch,
 ) -> None:
