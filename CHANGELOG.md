@@ -1,3 +1,10 @@
+## [1.9.5](https://github.com/lukislp/studylife-ai/compare/v1.9.4...v1.9.5) (2026-08-13)
+
+
+### Bug Fixes
+
+* **config:** promote gpt-5.6-luna + medium reasoning to RERANK_MODEL ([e11beed](https://github.com/lukislp/studylife-ai/commit/e11beedced54bef96337ab189da47d26b1eedfb4))
+
 ## [1.9.4](https://github.com/lukislp/studylife-ai/compare/v1.9.3...v1.9.4) (2026-08-13)
 
 
