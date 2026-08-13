@@ -1,3 +1,10 @@
+## [1.9.4](https://github.com/lukislp/studylife-ai/compare/v1.9.3...v1.9.4) (2026-08-13)
+
+
+### Bug Fixes
+
+* **rag:** exclude exact_date_match chunks from reranking entirely ([db57e97](https://github.com/lukislp/studylife-ai/commit/db57e97c66bbbda7148bf1b3d6fac89b9e245f86))
+
 ## [1.9.3](https://github.com/lukislp/studylife-ai/compare/v1.9.2...v1.9.3) (2026-08-12)
 
 
