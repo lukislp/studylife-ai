@@ -1,3 +1,10 @@
+## [1.9.6](https://github.com/lukislp/studylife-ai/compare/v1.9.5...v1.9.6) (2026-08-13)
+
+
+### Bug Fixes
+
+* **config:** promote gpt-5.6-luna + medium reasoning to LLM_MODEL ([7faac57](https://github.com/lukislp/studylife-ai/commit/7faac571632f02190e6f1cd4f0caa3e1f2b19bea))
+
 ## [1.9.5](https://github.com/lukislp/studylife-ai/compare/v1.9.4...v1.9.5) (2026-08-13)
 
 
