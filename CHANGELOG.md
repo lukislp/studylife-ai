@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/lukislp/studylife-ai/compare/v1.9.6...v1.10.0) (2026-08-16)
+
+
+### Features
+
+* **ingestion:** render Markdown notes to plain text before embedding ([914edbb](https://github.com/lukislp/studylife-ai/commit/914edbbdb0c83e04adfb1ec2cf2c153f3a39f52b))
+
 ## [1.9.6](https://github.com/lukislp/studylife-ai/compare/v1.9.5...v1.9.6) (2026-08-13)
 
 
