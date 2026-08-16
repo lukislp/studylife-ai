@@ -32,6 +32,7 @@ class StudyLifeNote(_StudyLifeDto):
     updated_at: datetime
     course_id: int | None = None
     session_id: int | None = None
+    is_markdown: bool = False
 
 
 class CourseDto(_StudyLifeDto):

@@ -1,7 +1,27 @@
 from datetime import datetime
 
-from studylife_ai.ingestion.rendering import render_course, render_course_goal, render_session
-from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudySessionDto
+from studylife_ai.ingestion.rendering import (
+    render_course,
+    render_course_goal,
+    render_note,
+    render_session,
+)
+from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
+
+
+def _note(**overrides: object) -> StudyLifeNote:
+    defaults: dict[str, object] = {
+        "id": 1,
+        "title": "Notiz",
+        "content": "plain text",
+        "created_at": datetime(2026, 8, 1, 10, 0),
+        "updated_at": datetime(2026, 8, 1, 10, 0),
+        "course_id": None,
+        "session_id": None,
+        "is_markdown": False,
+    }
+    defaults.update(overrides)
+    return StudyLifeNote(**defaults)  # type: ignore[arg-type]
 
 
 def _course(**overrides: object) -> CourseDto:
@@ -87,6 +107,34 @@ def test_render_course_goal_with_no_optional_fields() -> None:
     text = render_course_goal(_course_goal())
 
     assert text == "Course goal: Lineare Algebra"
+
+
+def test_render_note_non_markdown_passes_content_through_unchanged() -> None:
+    text = render_note(_note(content="# not actually markdown\n**stays raw**", is_markdown=False))
+
+    assert text == "# not actually markdown\n**stays raw**"
+
+
+def test_render_note_markdown_strips_syntax() -> None:
+    content = "# Heading\n\nSome **bold** and *italic* text with `inline code`.\n"
+    text = render_note(_note(content=content, is_markdown=True))
+
+    assert text == "Heading\n\nSome bold and italic text with inline code."
+
+
+def test_render_note_markdown_list_items_get_separated() -> None:
+    text = render_note(_note(content="- item one\n- item two\n", is_markdown=True))
+
+    assert "item one" in text
+    assert "item two" in text
+    assert "item oneitem two" not in text
+
+
+def test_render_note_markdown_link_keeps_only_the_text() -> None:
+    text = render_note(_note(content="[a link](https://example.com)", is_markdown=True))
+
+    assert text == "a link"
+    assert "https://example.com" not in text
 
 
 def test_render_course_goal_with_all_optional_fields() -> None:

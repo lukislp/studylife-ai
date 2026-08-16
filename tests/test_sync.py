@@ -37,7 +37,7 @@ async def _install_registered_users(monkeypatch: MonkeyPatch, users: dict[str, s
     monkeypatch.setattr(sync_module, "RegisteredKeyStore", lambda db_path: store)
 
 
-def _note(note_id: int, title: str, content: str) -> StudyLifeNote:
+def _note(note_id: int, title: str, content: str, *, is_markdown: bool = False) -> StudyLifeNote:
     return StudyLifeNote(
         id=note_id,
         title=title,
@@ -46,6 +46,7 @@ def _note(note_id: int, title: str, content: str) -> StudyLifeNote:
         updated_at="2026-08-01T10:00:00",  # type: ignore[arg-type]
         course_id=None,
         session_id=None,
+        is_markdown=is_markdown,
     )
 
 
@@ -170,6 +171,32 @@ async def test_sync_skips_unchanged_note(monkeypatch: MonkeyPatch) -> None:
 
     fake_store.replace_entity.assert_not_awaited()
     fake_store.delete_entity.assert_not_awaited()
+
+
+async def test_sync_ingests_markdown_note_as_stripped_plain_text(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    note = _note(1, "Linear Algebra", "# Eigenvalues\n\nAre **important**.", is_markdown=True)
+    fake_client = FakeStudyLifeClient(notes=[note])
+    fake_store = FakeQdrantStore(known={})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    _, kwargs = fake_store.replace_entity.call_args
+    assert kwargs["chunks"] == ["Eigenvalues Are important."]
+
+
+async def test_sync_reingests_note_when_only_is_markdown_toggled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    plain_note = _note(1, "Linear Algebra", "Eigenvalues are important.", is_markdown=False)
+    markdown_note = _note(1, "Linear Algebra", "Eigenvalues are important.", is_markdown=True)
+    fake_client = FakeStudyLifeClient(notes=[markdown_note])
+    fake_store = FakeQdrantStore(known={("note", 1): sync_module.fingerprint_note(plain_note)})
+
+    await _run_sync_all(monkeypatch, fake_client, fake_store)
+
+    fake_store.replace_entity.assert_awaited_once()
 
 
 async def test_sync_deletes_notes_no_longer_present(monkeypatch: MonkeyPatch) -> None:

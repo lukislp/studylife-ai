@@ -1,4 +1,35 @@
-from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudySessionDto
+from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
+
+
+def test_study_life_note_parses_camel_case_and_defaults_is_markdown_to_false() -> None:
+    note = StudyLifeNote.model_validate(
+        {
+            "id": 1,
+            "title": "Notiz",
+            "content": "text",
+            "createdAt": "2026-08-01T10:00:00",
+            "updatedAt": "2026-08-01T10:00:00",
+        }
+    )
+
+    assert note.course_id is None
+    assert note.session_id is None
+    assert note.is_markdown is False
+
+
+def test_study_life_note_parses_is_markdown_true() -> None:
+    note = StudyLifeNote.model_validate(
+        {
+            "id": 1,
+            "title": "Notiz",
+            "content": "# text",
+            "createdAt": "2026-08-01T10:00:00",
+            "updatedAt": "2026-08-01T10:00:00",
+            "isMarkdown": True,
+        }
+    )
+
+    assert note.is_markdown is True
 
 
 def test_course_dto_parses_camel_case_and_applies_defaults() -> None:

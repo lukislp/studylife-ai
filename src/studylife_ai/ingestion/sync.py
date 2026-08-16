@@ -25,6 +25,7 @@ from studylife_ai.ingestion.rendering import (
     DATETIME_FORMAT,
     render_course,
     render_course_goal,
+    render_note,
     render_session,
 )
 from studylife_ai.llm.embeddings import embed_texts
@@ -41,10 +42,12 @@ def fingerprint_note(note: StudyLifeNote) -> str:
     Deliberately not `note.updated_at`: StudyLife sets it via a server-local
     `DateTime.Now`, not UTC (see docs/decisions.md) — a content hash sidesteps
     that ambiguity entirely and also catches edits if the timestamp somehow
-    wasn't bumped. Hashes title+content (not just content) since a title-only
-    edit should still refresh stored metadata.
+    wasn't bumped. Hashes title+content+is_markdown (not just content) since a
+    title-only edit should still refresh stored metadata, and toggling
+    Markdown mode changes render_note()'s output even when the raw content
+    text itself doesn't change.
     """
-    digest = hashlib.sha256(f"{note.title}\n{note.content}".encode())
+    digest = hashlib.sha256(f"{note.title}\n{note.content}\n{note.is_markdown}".encode())
     return digest.hexdigest()
 
 
@@ -186,7 +189,7 @@ async def sync_user(
         content_type="note",
         entity_id=lambda n: n.id,
         fingerprint=fingerprint_note,
-        render_text=lambda n: n.content,
+        render_text=render_note,
         title=lambda n: n.title,
         course_id=lambda n: n.course_id,
         session_id=lambda n: n.session_id,

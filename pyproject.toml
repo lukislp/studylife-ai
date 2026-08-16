@@ -32,6 +32,12 @@ dependencies = [
     # status per endpoint) on top of the LLM cost/latency/token counters registered by hand
     # in llm/metrics.py.
     "prometheus-fastapi-instrumentator>=7.0",
+    # Notes Markdown mode (see docs/decisions.md "Note Markdown rendering"): StudyLife's
+    # NoteDto gained IsMarkdown - render_note() converts Markdown to plain text before
+    # chunking/embedding via mistune's HTML output + stdlib HTMLParser, so raw syntax
+    # (#, **, `, table pipes) doesn't leak into embeddings/RAG answers. Pure Python, no C
+    # extensions - fine for a Raspberry Pi/arm64 deployment.
+    "mistune>=3.0",
 ]
 
 [tool.uv]

@@ -10,12 +10,63 @@ underlying data (course names, topics, notes) is whatever language the
 user wrote it in - same language-neutral approach as the RAG prompt itself.
 """
 
-from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudySessionDto
+import re
+from html.parser import HTMLParser
+
+import mistune
+
+from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 
 _DATE_FORMAT = "%Y-%m-%d"
 # Public - sync.py's session title also needs this, to stay in sync with
 # render_session()'s own use of it rather than duplicating the literal.
 DATETIME_FORMAT = "%Y-%m-%d %H:%M"
+
+# "table" matches Markdig's default pipe-table support (StudyLife's Markdown renderer) - without
+# it mistune would leave table syntax as literal text instead of parsing it into <table> markup.
+_markdown_to_html = mistune.create_markdown(plugins=["table"])
+
+# Block-level tags get a leading newline so e.g. two list items or a heading followed by a
+# paragraph don't run together into one sentence once tags are stripped.
+_BLOCK_TAGS = frozenset(
+    {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "tr", "pre", "br"}
+)
+_BLANK_LINES = re.compile(r"\n{3,}")
+
+
+class _HtmlTextExtractor(HTMLParser):
+    """Strips tags from mistune's HTML output, keeping block structure as newlines."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        return _BLANK_LINES.sub("\n\n", "".join(self._parts)).strip()
+
+
+def render_note(note: StudyLifeNote) -> str:
+    """Notes are freeform text a user typed - Markdown-mode ones (see docs/decisions.md "Note
+    Markdown rendering") are rendered to plain text before embedding, so raw syntax doesn't
+    become part of the vector or leak into a cited RAG answer. Non-Markdown notes pass through
+    unchanged, same as before this existed."""
+    if not note.is_markdown:
+        return note.content
+    html = _markdown_to_html(note.content)
+    # mistune's return type is a union because create_markdown() can be configured with an
+    # AST renderer instead - _markdown_to_html above always uses the default "html" renderer,
+    # so this is always a str in practice.
+    assert isinstance(html, str)
+    extractor = _HtmlTextExtractor()
+    extractor.feed(html)
+    return extractor.get_text()
 
 
 def render_course(course: CourseDto) -> str:
