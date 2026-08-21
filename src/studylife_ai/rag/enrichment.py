@@ -1,7 +1,9 @@
 """Capture enrichment (studylife-capture browser extension, see docs/decisions.md "Capture
-enrichment"): given a freshly captured note's text, finds the best-matching existing course by
-embedding similarity and generates a short tag list + one-sentence summary via a dedicated LLM
-call. Same "never raises, degrade to a safe default" contract as rag/rerank.py and
+enrichment" and "Capture enrichment: related notes + immediate ingestion"): given a freshly
+captured note's text, finds the best-matching existing course and the most similar existing
+notes by embedding similarity, generates a short tag list + one-sentence summary via a dedicated
+LLM call, and immediately embeds the capture itself into Qdrant instead of waiting for the next
+periodic sync. Same "never raises, degrade to a safe default" contract as rag/rerank.py and
 rag/date_parse.py - a bad LLM response or an unreachable Qdrant must not fail the enrichment
 call, since the note it's enriching has already been created by the time this runs (called from
 api/internal.py's /internal/enrich-capture, itself triggered by StudyLife's own background task,
@@ -9,19 +11,30 @@ not synchronously from the extension's save request - see StudyLife.Server's
 BackgroundTaskService.CaptureEnrichment.cs).
 """
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from studylife_ai.config import Settings
-from studylife_ai.ingestion.qdrant_store import QdrantStore
+from studylife_ai.ingestion.chunking import chunk_text
+from studylife_ai.ingestion.qdrant_store import EntityChunkMetadata, QdrantStore
+from studylife_ai.ingestion.rendering import render_note
+from studylife_ai.ingestion.sync import fingerprint_note
 from studylife_ai.llm.client import complete_chat
 from studylife_ai.llm.embeddings import embed_texts
 from studylife_ai.schemas.chat import ChatMessage
+from studylife_ai.studylife.models import StudyLifeNote
 
 logger = logging.getLogger(__name__)
 
 _MAX_TAGS = 5
+_MAX_RELATED_NOTES = 3
+# Raw chunk candidates fetched before deduping to distinct notes (see _find_related_notes) - a
+# long existing note can contribute several chunks to the top results, so this needs headroom
+# above _MAX_RELATED_NOTES to still surface that many DISTINCT notes.
+_RELATED_NOTES_CANDIDATE_POOL = 10
 _CONTENT_PREVIEW_CHARS = 2000
 
 _PROMPT_TEMPLATE = (
@@ -41,6 +54,7 @@ class CaptureEnrichment:
     course_confidence: float | None
     tags: list[str]
     summary: str | None
+    related_note_ids: list[int]
 
 
 def _build_prompt(title: str, content: str) -> str:
@@ -67,28 +81,69 @@ def _parse_response(response: str) -> tuple[list[str], str | None]:
     return tags, summary
 
 
-async def _match_course(
-    content: str, *, user_id: str, settings: Settings, store: QdrantStore
-) -> tuple[int | None, float | None]:
-    """Embeds `content` and searches the course partition of the shared Qdrant collection for
-    the closest match (see ingestion/sync.py's `render_course()` - courses are embedded the same
-    way notes/sessions/goals are, `entity_id` is the real course id). Never raises - any failure
-    (embedding call, Qdrant unreachable) just leaves the capture unassigned."""
+async def _embed_content(content: str, *, user_id: str, settings: Settings) -> list[float] | None:
+    """Embeds `content` once, reused by both _match_course and _find_related_notes below (was
+    previously embedded separately per call site - wasteful, and the two searches want the exact
+    same vector anyway). Never raises - a failure here just means course-matching and
+    related-notes both degrade to empty, independent of tag/summary generation."""
     try:
         vectors = await embed_texts(
             [content], model=settings.embedding_model, call_site="capture-enrich", user_id=user_id
         )
-        if not vectors:
-            return None, None
-        results = await store.search(
-            vector=vectors[0], user_id=user_id, limit=1, content_type="course"
-        )
+        return vectors[0] if vectors else None
+    except Exception:
+        logger.exception("Capture content embedding failed for user_id=%s", user_id)
+        return None
+
+
+async def _match_course(
+    vector: list[float] | None, *, user_id: str, settings: Settings, store: QdrantStore
+) -> tuple[int | None, float | None]:
+    """Searches the course partition of the shared Qdrant collection for the closest match (see
+    ingestion/sync.py's `render_course()` - courses are embedded the same way notes/sessions/
+    goals are, `entity_id` is the real course id). Never raises - any failure (no vector,
+    Qdrant unreachable) just leaves the capture unassigned."""
+    if vector is None:
+        return None, None
+    try:
+        results = await store.search(vector=vector, user_id=user_id, limit=1, content_type="course")
         if not results or results[0].score < settings.capture_course_match_threshold:
             return None, None
         return results[0].entity_id, results[0].score
     except Exception:
         logger.exception("Capture course-matching failed for user_id=%s", user_id)
         return None, None
+
+
+async def _find_related_notes(
+    vector: list[float] | None, *, user_id: str, note_id: int, store: QdrantStore
+) -> list[int]:
+    """Searches the note partition for the most similar EXISTING notes (excluding the capture
+    being enriched itself, in case it was already immediately-ingested by a previous partial
+    run - see _ingest_note). Results are per-CHUNK, not per-note (ingestion/sync.py's
+    entity_id=lambda n: n.id for notes, but a long note can contribute several chunks) - dedupes
+    to distinct note ids, keeping the first (highest-scoring, since QdrantStore.search() returns
+    Qdrant's own score-sorted order) occurrence of each. Never raises - a Qdrant outage just
+    means no related notes are suggested, independent of every other enrichment step."""
+    if vector is None:
+        return []
+    try:
+        results = await store.search(
+            vector=vector, user_id=user_id, limit=_RELATED_NOTES_CANDIDATE_POOL, content_type="note"
+        )
+        related: list[int] = []
+        seen = {note_id}
+        for chunk in results:
+            if chunk.entity_id in seen:
+                continue
+            seen.add(chunk.entity_id)
+            related.append(chunk.entity_id)
+            if len(related) >= _MAX_RELATED_NOTES:
+                break
+        return related
+    except Exception:
+        logger.exception("Capture related-notes search failed for user_id=%s", user_id)
+        return []
 
 
 async def _generate_tags_and_summary(
@@ -121,17 +176,108 @@ async def _generate_tags_and_summary(
     return _parse_response(response)
 
 
+async def _ingest_note(
+    note_id: int,
+    title: str,
+    content: str,
+    *,
+    user_id: str,
+    settings: Settings,
+    store: QdrantStore,
+    course_id: int | None,
+) -> None:
+    """Immediately embeds+upserts the just-created capture note into Qdrant instead of waiting
+    for the next periodic sync_all() pass (up to ingestion_sync_interval_seconds later, see
+    ingestion/scheduler.py) - so it's searchable right away, both for a future capture's
+    related-notes search above and for /chat and /agent. Safe to run every time a capture is
+    enriched even though the next periodic sync will see this note again and write it a second
+    time: QdrantStore.replace_entity() always deletes-then-inserts (see its own docstring), so no
+    duplicate points are ever possible regardless of fingerprint drift - at worst a fingerprint
+    mismatch costs one harmless extra re-embed on the next sync tick, never a correctness issue.
+
+    Builds a minimal placeholder StudyLifeNote purely to reuse fingerprint_note()/render_note()
+    instead of duplicating their formulas here - is_markdown=False is exact, not a guess (the
+    studylife-capture extension always sends isMarkdown: false, see its api.ts), so the
+    fingerprint this writes matches what the next real sync_all() pass computes from StudyLife's
+    own API response, as long as the note is unedited in between (the common case).
+    """
+    try:
+        placeholder = StudyLifeNote(
+            id=note_id,
+            title=title,
+            content=content,
+            is_markdown=False,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            course_id=course_id,
+            session_id=None,
+        )
+        rendered = render_note(placeholder)
+        chunks = chunk_text(
+            rendered,
+            chunk_size_tokens=settings.chunk_size_tokens,
+            overlap_tokens=settings.chunk_overlap_tokens,
+        )
+        vectors = (
+            await embed_texts(
+                chunks,
+                model=settings.embedding_model,
+                call_site="capture-enrich-ingest",
+                user_id=user_id,
+            )
+            if chunks
+            else []
+        )
+        if vectors:
+            await store.ensure_collection(vector_size=len(vectors[0]))
+        await store.replace_entity(
+            chunks=chunks,
+            vectors=vectors,
+            metadata=EntityChunkMetadata(
+                content_type="note",
+                entity_id=note_id,
+                title=title,
+                course_id=course_id,
+                session_id=None,
+                user_id=user_id,
+                fingerprint=fingerprint_note(placeholder),
+                session_start=None,
+            ),
+        )
+    except Exception:
+        logger.exception("Immediate ingestion failed for user_id=%s note_id=%d", user_id, note_id)
+
+
 async def enrich_capture(
-    title: str, content: str, *, user_id: str, settings: Settings, store: QdrantStore
+    note_id: int, title: str, content: str, *, user_id: str, settings: Settings, store: QdrantStore
 ) -> CaptureEnrichment:
-    """Never raises - course-matching and tag/summary generation degrade to safe defaults
-    independently, so e.g. a Qdrant outage doesn't also block tag/summary generation."""
-    course_id, confidence = await _match_course(
-        content, user_id=user_id, settings=settings, store=store
+    """Never raises - every sub-step degrades to a safe default independently, so e.g. a Qdrant
+    outage doesn't also block tag/summary generation, and vice versa.
+
+    Course-matching, related-notes search, and tag/summary generation all run concurrently
+    (independent of each other - the first two share one embedding call, the third doesn't need
+    a vector at all); immediate ingestion runs last, after course_id is known, so the ingested
+    note's own Qdrant payload carries the correct course_id from the start rather than None.
+    """
+    vector = await _embed_content(content, user_id=user_id, settings=settings)
+    (course_id, confidence), related_note_ids, (tags, summary) = await asyncio.gather(
+        _match_course(vector, user_id=user_id, settings=settings, store=store),
+        _find_related_notes(vector, user_id=user_id, note_id=note_id, store=store),
+        _generate_tags_and_summary(title, content, user_id=user_id, settings=settings),
     )
-    tags, summary = await _generate_tags_and_summary(
-        title, content, user_id=user_id, settings=settings
+    await _ingest_note(
+        note_id,
+        title,
+        content,
+        user_id=user_id,
+        settings=settings,
+        store=store,
+        course_id=course_id,
     )
     return CaptureEnrichment(
-        course_id=course_id, course_confidence=confidence, tags=tags, summary=summary
+        course_id=course_id,
+        course_confidence=confidence,
+        tags=tags,
+        summary=summary,
+        related_note_ids=related_note_ids,
     )
