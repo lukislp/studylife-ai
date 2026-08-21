@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/lukislp/studylife-ai/compare/v1.10.0...v1.11.0) (2026-08-21)
+
+
+### Features
+
+* add source_url to StudyLifeNote model ([4e81fa6](https://github.com/lukislp/studylife-ai/commit/4e81fa6f4c4cfc71cf25953c8deb586bbb10104f))
+
 # [1.10.0](https://github.com/lukislp/studylife-ai/compare/v1.9.6...v1.10.0) (2026-08-16)
 
 
