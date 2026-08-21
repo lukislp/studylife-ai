@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/lukislp/studylife-ai/compare/v1.13.0...v1.13.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* allow studylife-worker to reach studylife-ai, log near-miss course matches ([ea8fa8f](https://github.com/lukislp/studylife-ai/commit/ea8fa8f3da6d25847d5ea6f64a82ed92adb1f012))
+
 # [1.13.0](https://github.com/lukislp/studylife-ai/compare/v1.12.0...v1.13.0) (2026-08-21)
 
 
