@@ -197,6 +197,14 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 20
     rate_limit_window_seconds: int = 60
 
+    # Capture enrichment (studylife-capture browser extension, see docs/decisions.md "Capture
+    # enrichment"): cosine-similarity threshold (rag/enrichment.py's course vector search,
+    # Qdrant's COSINE distance) above which a captured note's courseId gets auto-assigned. Below
+    # this, the capture is left unassigned rather than risk a wrong guess - a wrong course
+    # assignment silently mis-files a note where the user won't think to look for it, worse than
+    # leaving it unsorted for manual filing.
+    capture_course_match_threshold: float = 0.75
+
 
 @lru_cache
 def get_settings() -> Settings:

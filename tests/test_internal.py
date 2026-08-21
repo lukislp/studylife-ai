@@ -3,9 +3,11 @@ import logging
 from httpx import AsyncClient
 from pytest import LogCaptureFixture, MonkeyPatch
 
+from studylife_ai.api import internal as internal_module
 from studylife_ai.api.internal import SHARED_SECRET_HEADER, _sync_new_registration
 from studylife_ai.config import Settings
 from studylife_ai.main import app
+from studylife_ai.rag.enrichment import CaptureEnrichment
 from tests.conftest import TEST_SHARED_SECRET
 
 
@@ -166,3 +168,58 @@ async def test_revoke_key_is_a_noop_for_an_unknown_user(client: AsyncClient) -> 
     )
 
     assert response.status_code == 200
+
+
+async def test_enrich_capture_returns_the_enrichment_result(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    calls = []
+
+    async def fake_enrich_capture(title: str, content: str, **kwargs: object) -> CaptureEnrichment:
+        calls.append({"title": title, "content": content, **kwargs})
+        return CaptureEnrichment(course_id=7, course_confidence=0.9, tags=["a", "b"], summary="S.")
+
+    monkeypatch.setattr(internal_module, "enrich_capture", fake_enrich_capture)
+
+    response = await client.post(
+        "/internal/enrich-capture",
+        json={
+            "user_id": "alice",
+            "note_id": 42,
+            "title": "My note",
+            "content": "Some captured content",
+            "source_url": "https://example.com/article",
+        },
+        headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "course_id": 7,
+        "course_confidence": 0.9,
+        "tags": ["a", "b"],
+        "summary": "S.",
+    }
+    assert len(calls) == 1
+    assert calls[0]["title"] == "My note"
+    assert calls[0]["content"] == "Some captured content"
+    assert calls[0]["user_id"] == "alice"
+
+
+async def test_enrich_capture_rejects_a_wrong_secret(client: AsyncClient) -> None:
+    response = await client.post(
+        "/internal/enrich-capture",
+        json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
+        headers={SHARED_SECRET_HEADER: "wrong-secret"},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_enrich_capture_rejects_a_missing_secret(client: AsyncClient) -> None:
+    response = await client.post(
+        "/internal/enrich-capture",
+        json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
+    )
+
+    assert response.status_code == 401

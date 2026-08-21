@@ -18,7 +18,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.sync import sync_user
-from studylife_ai.schemas.internal import RegisterKeyRequest, RevokeKeyRequest
+from studylife_ai.rag.enrichment import enrich_capture
+from studylife_ai.schemas.internal import (
+    EnrichCaptureRequest,
+    EnrichCaptureResponse,
+    RegisterKeyRequest,
+    RevokeKeyRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +85,36 @@ async def revoke_key(request: RevokeKeyRequest, http_request: Request) -> dict[s
     await http_request.app.state.registered_key_store.delete(request.user_id)
     logger.info("Revoked AiApiKey for user_id=%s", request.user_id)
     return {"ok": True}
+
+
+@router.post("/internal/enrich-capture")
+async def enrich_capture_endpoint(
+    request: EnrichCaptureRequest, http_request: Request
+) -> EnrichCaptureResponse:
+    """Called by StudyLife's BackgroundTaskService (CaptureEnrichment sub-task) shortly after a
+    studylife-capture browser-extension save - course-matching and tag/summary generation for
+    one note. See rag/enrichment.py for the actual logic; this endpoint is just the internal-
+    trust-boundary wrapper (same auth as register-key/revoke-key above)."""
+    _require_valid_secret(http_request)
+    settings = get_settings()
+    result = await enrich_capture(
+        request.title,
+        request.content,
+        user_id=request.user_id,
+        settings=settings,
+        store=http_request.app.state.qdrant_store,
+    )
+    logger.info(
+        "Capture enrichment for user_id=%s note_id=%d: course_id=%s confidence=%s tags=%d",
+        request.user_id,
+        request.note_id,
+        result.course_id,
+        result.course_confidence,
+        len(result.tags),
+    )
+    return EnrichCaptureResponse(
+        course_id=result.course_id,
+        course_confidence=result.course_confidence,
+        tags=result.tags,
+        summary=result.summary,
+    )
