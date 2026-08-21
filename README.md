@@ -10,6 +10,7 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 - **Study Assistant (RAG)** — answer questions about notes, courses, and calendar data, with citations back to the source.
 - **Study Plan Generator** — turn exam dates, ECTS targets, and availability into a weekly plan.
 - **Agent Actions (function calling)** — create sessions and summarize+save notes via the existing StudyLife REST API. Write actions always go through a confirmation flow (see [Agent](#agent)).
+- **Capture enrichment** — course matching, tags, a summary, and related-notes suggestions for notes saved via the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension (see [Capture enrichment](#capture-enrichment)).
 - **Evaluation** — a RAGAS-based eval pipeline (faithfulness, answer relevancy, context precision) running in CI.
 
 This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
@@ -20,6 +21,8 @@ M1 (scaffold, `/health`, streaming `/chat`), M2 (ingestion + Qdrant + RAG v1 wit
 
 **Post-M5 production hardening**, all found and fixed via live testing against the real deployment, not assumed: an in-process scheduler now re-syncs every registered account every 60s (content changed via the agent or directly in StudyLife used to only reach `/chat` after a one-time or manually-triggered sync); sessions gained a real structured date field in Qdrant with a genuine range filter, replacing an approach that handed an LLM reranker the user's entire session history and asked it to read dates out of free text - that approach worked for "today" but degraded on less obvious offsets, one round even producing a fabricated session; the reranker itself moved from an unpinned-temperature `gpt-4o-mini` call to a temperature-0 `gpt-4o` call once direct testing (`kubectl exec` into the live pod, real query, real data) showed the smaller model truncating its ranking output on pools above ~40 candidates; the agent gained a system prompt (it had none beyond a date message) after silently guessing between two similarly-named real courses instead of asking; and `RETRIEVAL_TOP_K` was raised after a CI eval regression traced to four content types competing for a fixed final cut. Full writeups with the live evidence for each: [docs/decisions.md](docs/decisions.md).
 
+**Capture enrichment** (2026-08-21, see [Capture enrichment](#capture-enrichment)): a new `POST /internal/enrich-capture` endpoint backs the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension — course matching (scoped to the user's active courses, with a note/session fallback once a direct-embedding match against a real capture proved unreliable on its own, 0.44 vs. a 0.75 threshold in the case that surfaced it), tags, a one-sentence summary, related-notes suggestions, and immediate Qdrant indexing. Found and fixed live in production: a `NetworkPolicy` gap that silently dropped every call from StudyLife's background worker specifically (invisible in this service's own logs, since the request never arrived) — see [docs/decisions.md](docs/decisions.md) "Capture enrichment".
+
 ## Architecture
 
 ```mermaid
@@ -28,8 +31,11 @@ flowchart LR
         BlazorUI["Blazor WASM UI\nAgentChatModal"]
         AiProxy["AiProxyController\n(mints proxy tokens)"]
         StudyLifeAPI["ASP.NET Core REST API"]
+        CaptureWorker["Worker\n(CaptureEnrichment)"]
         StudyLifeDB[("StudyLife DB")]
     end
+
+    Capture["studylife-capture\n(browser extension)"]
 
     subgraph AI["StudyLife AI (this repo)"]
         FastAPI["FastAPI service\n(SSE streaming)"]
@@ -59,9 +65,13 @@ flowchart LR
     Scheduler -- reads --> StudyLifeAPI
     Scheduler -- writes --> Qdrant
     StudyLifeAPI --> StudyLifeDB
+    Capture -- "X-Api-Key" --> StudyLifeAPI
+    StudyLifeAPI -. "SourceUrl set, unenriched" .-> CaptureWorker
+    CaptureWorker -- "shared secret\nPOST /internal/enrich-capture" --> FastAPI
+    FastAPI -- "course match, tags,\nsummary, related notes" --> CaptureWorker
 ```
 
-`AiProxyController` mints a short-lived, HMAC-signed proxy token identifying the logged-in user without ever needing their `AiApiKey` (which StudyLife only ever stores a hash of, never the plaintext, so it can't be forwarded) — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". The ingestion scheduler replaced a one-shot/manual-only sync: it re-syncs every registered account on a fixed interval so content changed via the agent or directly in StudyLife shows up in `/chat` within about a minute — see [Ingestion](#ingestion) and "Periodic ingestion sync".
+`AiProxyController` mints a short-lived, HMAC-signed proxy token identifying the logged-in user without ever needing their `AiApiKey` (which StudyLife only ever stores a hash of, never the plaintext, so it can't be forwarded) — see [docs/decisions.md](docs/decisions.md) "M4.5 Multi-user support". The ingestion scheduler replaced a one-shot/manual-only sync: it re-syncs every registered account on a fixed interval so content changed via the agent or directly in StudyLife shows up in `/chat` within about a minute — see [Ingestion](#ingestion) and "Periodic ingestion sync". Capture enrichment (`/internal/enrich-capture`, see [Capture enrichment](#capture-enrichment)) reuses the same shared-secret trust boundary as `register-key`/`revoke-key`, not the per-request proxy token — it's called from StudyLife's own backend, asynchronously and well after any live user session, so there's no per-request token to mint from.
 
 ## Quickstart
 
@@ -134,6 +144,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `AGENT_CHECKPOINT_DB_PATH`     | `agent_checkpoints.db`    | SQLite file storing paused agent state between a proposed write action and its confirmation — survives a service restart. See [Agent](#agent). |
 | `RATE_LIMIT_REQUESTS`          | `20`                      | Max requests per `RATE_LIMIT_WINDOW_SECONDS`, per resolved user, on `/chat`/`/agent`/`/agent/confirm` — see [docs/decisions.md](docs/decisions.md) "Rate limiting". |
 | `RATE_LIMIT_WINDOW_SECONDS`    | `60`                      | Window size for the rate limit above. |
+| `CAPTURE_COURSE_MATCH_THRESHOLD` | `0.75`                  | Minimum embedding-similarity score (Qdrant COSINE distance) for `/internal/enrich-capture` to auto-assign a course to a captured note — below this, the capture is left unassigned rather than risk a wrong guess. See [Capture enrichment](#capture-enrichment). |
 
 ## API
 
@@ -143,6 +154,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 - `POST /chat` — RAG-augmented, streams an LLM completion as Server-Sent Events. Request body: `{"messages": [{"role": "user", "content": "..."}], "model": "optional-override"}`. The latest user message is used to retrieve relevant chunks, scoped to the calling user's own Qdrant partition: an even candidate quota is fetched from each content type (notes, courses, sessions, course goals), merged, optionally reranked by an LLM (`RERANK_MODEL`), then cut down to `RETRIEVAL_TOP_K` and injected as a system message ahead of the conversation (see [Retrieval quality](docs/decisions.md)). Events: `data: {"delta": "..."}` per token, then one `data: {"sources": [{"content_type": "note", "entity_id": ..., "title": "...", "course_id": ...}, ...]}` listing the entities actually retrieved (independent of whether the model cited them), then `data: [DONE]`.
 - `POST /agent` / `POST /agent/confirm` — tool-calling with confirmed writes, see [Agent](#agent).
 - `POST /internal/register-key` / `POST /internal/revoke-key` — not part of the public chat/agent surface; called only by StudyLife's backend (see [docs/decisions.md](docs/decisions.md)) to keep `REGISTERED_KEYS_DB_PATH` in sync with a user's real `AiApiKey`. Authenticated by comparing `X-StudyLife-Shared-Secret` against `STUDYLIFE_SHARED_SECRET`.
+- `POST /internal/enrich-capture` — same internal trust boundary as the two above (`X-StudyLife-Shared-Secret`), called by StudyLife's `BackgroundTaskService.CaptureEnrichment` shortly after a [studylife-capture](https://github.com/lukislp/studylife-capture) browser-extension save. See [Capture enrichment](#capture-enrichment).
 
 ## Ingestion
 
@@ -182,6 +194,17 @@ curl -X POST http://localhost:8000/agent/confirm \
 ```
 
 `thread_id` embeds the proposing user's id (`f"{user_id}:{uuid4()}"`) - `POST /agent/confirm` rejects with `403` if the caller's own resolved id doesn't match, before the checkpointer (or even a `StudyLifeClient`) is ever touched (see [docs/decisions.md](docs/decisions.md)). Both endpoints require `STUDYLIFE_API_BASE_URL` to be set (`503` otherwise) and a registered `AiApiKey` for the calling user (`404` otherwise, see [Ingestion](#ingestion)); an invalid/expired proxy token returns `401`.
+
+## Capture enrichment
+
+Enriches one note at a time, saved via the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension: `POST /internal/enrich-capture` (see [`rag/enrichment.py`](src/studylife_ai/rag/enrichment.py)). Never raises — every sub-step degrades to a safe default independently, so e.g. a Qdrant outage doesn't also block tag/summary generation:
+
+- **Course matching**, scoped to `active_course_ids` (StudyLife's `UserSettingsDto.SelectedCourseIds` — matching against a user's entire course history, including semesters-old completed courses, made a wrong match measurably more likely purely from topical vocabulary overlap). Two steps, both against this scoped set: first a direct embedding search against the course's own (sparse) description; if that scores below `CAPTURE_COURSE_MATCH_THRESHOLD`, a fallback search against the user's own existing notes and sessions instead — a real capture's prose overlaps far more with how the user already writes about a course than with the course's own short description/topic list. Below the threshold either way, the capture is left unassigned rather than risk a wrong guess.
+- **Tags and a one-sentence summary**, from the same small/fast model used for reranking (`RERANK_MODEL`, falling back to `LLM_MODEL`).
+- **Related notes** — up to a few of the most similar existing notes, by plain embedding search over the note partition (excluding the capture itself).
+- **Immediate Qdrant ingestion** — the capture is embedded and indexed right away via `QdrantStore.replace_entity()` (safe to run twice — always deletes-then-inserts, so the next periodic sync re-ingesting the same note is a harmless no-op), so it's searchable via `/chat`/`/agent` immediately instead of waiting for the next `INGESTION_SYNC_INTERVAL_SECONDS` tick.
+
+Authenticated the same way as `register-key`/`revoke-key` (`X-StudyLife-Shared-Secret`), not the per-request proxy token — this call originates from StudyLife's own backend asynchronously, well after the user's browser interaction ended, so there's no live session to mint a proxy token from. See [docs/decisions.md](docs/decisions.md) "Capture enrichment" for the full design history, including a live production incident (a `NetworkPolicy` gap that silently blocked this exact call path) and the note/session fallback's own reasoning.
 
 ## Evaluation
 
@@ -245,6 +268,7 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
 - [x] **Metrics dashboard** — LLM cost/latency/token Prometheus metrics, per-user cost attribution, scraped by the existing self-hosted Prometheus and visualized in its own Grafana folder (see [Observability](#observability) and [docs/decisions.md](docs/decisions.md) "Metrics dashboard").
 - [x] **Note Markdown rendering** — StudyLife's `NoteDto` gained `isMarkdown`; notes written in Markdown mode are now rendered to plain text before chunking/embedding, so raw syntax doesn't leak into RAG answers (see [docs/decisions.md](docs/decisions.md) "Note Markdown rendering").
+- [x] **Capture enrichment** — `POST /internal/enrich-capture` for the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension: course matching scoped to active courses with a note/session fallback, tags, summary, related notes, immediate indexing. Production-verified, including a live `NetworkPolicy` fix. See [Capture enrichment](#capture-enrichment).
 
 ## Tech stack
 
