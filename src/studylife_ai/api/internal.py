@@ -92,12 +92,14 @@ async def enrich_capture_endpoint(
     request: EnrichCaptureRequest, http_request: Request
 ) -> EnrichCaptureResponse:
     """Called by StudyLife's BackgroundTaskService (CaptureEnrichment sub-task) shortly after a
-    studylife-capture browser-extension save - course-matching and tag/summary generation for
-    one note. See rag/enrichment.py for the actual logic; this endpoint is just the internal-
-    trust-boundary wrapper (same auth as register-key/revoke-key above)."""
+    studylife-capture browser-extension save - course-matching, related-notes lookup, tag/
+    summary generation, and immediate Qdrant ingestion for one note. See rag/enrichment.py for
+    the actual logic; this endpoint is just the internal-trust-boundary wrapper (same auth as
+    register-key/revoke-key above)."""
     _require_valid_secret(http_request)
     settings = get_settings()
     result = await enrich_capture(
+        request.note_id,
         request.title,
         request.content,
         user_id=request.user_id,
@@ -105,16 +107,19 @@ async def enrich_capture_endpoint(
         store=http_request.app.state.qdrant_store,
     )
     logger.info(
-        "Capture enrichment for user_id=%s note_id=%d: course_id=%s confidence=%s tags=%d",
+        "Capture enrichment for user_id=%s note_id=%d: course_id=%s confidence=%s tags=%d "
+        "related=%d",
         request.user_id,
         request.note_id,
         result.course_id,
         result.course_confidence,
         len(result.tags),
+        len(result.related_note_ids),
     )
     return EnrichCaptureResponse(
         course_id=result.course_id,
         course_confidence=result.course_confidence,
         tags=result.tags,
         summary=result.summary,
+        related_note_ids=result.related_note_ids,
     )

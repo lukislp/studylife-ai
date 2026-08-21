@@ -14,9 +14,9 @@ class RevokeKeyRequest(BaseModel):
 
 class EnrichCaptureRequest(BaseModel):
     user_id: str
-    # Purely a log-correlation id (which note this enrichment run was for) - not used to look
-    # anything up on this side, StudyLife's own background task already knows which note to
-    # write the result back onto.
+    # The real StudyLife note id - used as the Qdrant entity_id for immediate ingestion
+    # (rag/enrichment.py's _ingest_note) and to exclude this note from its own related-notes
+    # search (_find_related_notes), plus log correlation.
     note_id: int
     title: str
     content: str
@@ -28,3 +28,4 @@ class EnrichCaptureResponse(BaseModel):
     course_confidence: float | None
     tags: list[str]
     summary: str | None
+    related_note_ids: list[int]

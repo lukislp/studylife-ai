@@ -175,9 +175,17 @@ async def test_enrich_capture_returns_the_enrichment_result(
 ) -> None:
     calls = []
 
-    async def fake_enrich_capture(title: str, content: str, **kwargs: object) -> CaptureEnrichment:
-        calls.append({"title": title, "content": content, **kwargs})
-        return CaptureEnrichment(course_id=7, course_confidence=0.9, tags=["a", "b"], summary="S.")
+    async def fake_enrich_capture(
+        note_id: int, title: str, content: str, **kwargs: object
+    ) -> CaptureEnrichment:
+        calls.append({"note_id": note_id, "title": title, "content": content, **kwargs})
+        return CaptureEnrichment(
+            course_id=7,
+            course_confidence=0.9,
+            tags=["a", "b"],
+            summary="S.",
+            related_note_ids=[3, 5],
+        )
 
     monkeypatch.setattr(internal_module, "enrich_capture", fake_enrich_capture)
 
@@ -199,8 +207,10 @@ async def test_enrich_capture_returns_the_enrichment_result(
         "course_confidence": 0.9,
         "tags": ["a", "b"],
         "summary": "S.",
+        "related_note_ids": [3, 5],
     }
     assert len(calls) == 1
+    assert calls[0]["note_id"] == 42
     assert calls[0]["title"] == "My note"
     assert calls[0]["content"] == "Some captured content"
     assert calls[0]["user_id"] == "alice"
