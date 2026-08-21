@@ -197,6 +197,7 @@ async def test_enrich_capture_returns_the_enrichment_result(
             "title": "My note",
             "content": "Some captured content",
             "source_url": "https://example.com/article",
+            "active_course_ids": [1, 2, 3],
         },
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
     )
@@ -211,9 +212,32 @@ async def test_enrich_capture_returns_the_enrichment_result(
     }
     assert len(calls) == 1
     assert calls[0]["note_id"] == 42
-    assert calls[0]["title"] == "My note"
-    assert calls[0]["content"] == "Some captured content"
-    assert calls[0]["user_id"] == "alice"
+    assert calls[0]["active_course_ids"] == [1, 2, 3]
+
+
+async def test_enrich_capture_defaults_active_course_ids_to_empty_list(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    calls = []
+
+    async def fake_enrich_capture(
+        note_id: int, title: str, content: str, **kwargs: object
+    ) -> CaptureEnrichment:
+        calls.append(kwargs)
+        return CaptureEnrichment(
+            course_id=None, course_confidence=None, tags=[], summary=None, related_note_ids=[]
+        )
+
+    monkeypatch.setattr(internal_module, "enrich_capture", fake_enrich_capture)
+
+    response = await client.post(
+        "/internal/enrich-capture",
+        json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
+        headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["active_course_ids"] == []
 
 
 async def test_enrich_capture_rejects_a_wrong_secret(client: AsyncClient) -> None:
