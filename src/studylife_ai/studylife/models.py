@@ -33,6 +33,7 @@ class StudyLifeNote(_StudyLifeDto):
     course_id: int | None = None
     session_id: int | None = None
     is_markdown: bool = False
+    source_url: str | None = None
 
 
 class CourseDto(_StudyLifeDto):

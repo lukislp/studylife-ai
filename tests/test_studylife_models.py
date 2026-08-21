@@ -15,6 +15,7 @@ def test_study_life_note_parses_camel_case_and_defaults_is_markdown_to_false() -
     assert note.course_id is None
     assert note.session_id is None
     assert note.is_markdown is False
+    assert note.source_url is None
 
 
 def test_study_life_note_parses_is_markdown_true() -> None:
@@ -30,6 +31,21 @@ def test_study_life_note_parses_is_markdown_true() -> None:
     )
 
     assert note.is_markdown is True
+
+
+def test_study_life_note_parses_source_url() -> None:
+    note = StudyLifeNote.model_validate(
+        {
+            "id": 1,
+            "title": "Notiz",
+            "content": "text",
+            "createdAt": "2026-08-01T10:00:00",
+            "updatedAt": "2026-08-01T10:00:00",
+            "sourceUrl": "https://example.com/article",
+        }
+    )
+
+    assert note.source_url == "https://example.com/article"
 
 
 def test_course_dto_parses_camel_case_and_applies_defaults() -> None:
