@@ -102,12 +102,30 @@ async def _match_course(
     """Searches the course partition of the shared Qdrant collection for the closest match (see
     ingestion/sync.py's `render_course()` - courses are embedded the same way notes/sessions/
     goals are, `entity_id` is the real course id). Never raises - any failure (no vector,
-    Qdrant unreachable) just leaves the capture unassigned."""
+    Qdrant unreachable) just leaves the capture unassigned.
+
+    Both "no course found at all" and "found one but below threshold" return (None, None) - the
+    public contract deliberately doesn't distinguish them (the caller only cares "assign or
+    don't"). The two log lines below exist purely so the difference is diagnosable from logs
+    alone (found live, 2026-08-21: `course_id=None confidence=None` in the endpoint's own log
+    line is genuinely ambiguous between "zero course results" and "a near-miss just under
+    capture_course_match_threshold" - operationally very different situations)."""
     if vector is None:
         return None, None
     try:
         results = await store.search(vector=vector, user_id=user_id, limit=1, content_type="course")
-        if not results or results[0].score < settings.capture_course_match_threshold:
+        if not results:
+            logger.info("Capture course-matching: no course results at all for user_id=%s", user_id)
+            return None, None
+        if results[0].score < settings.capture_course_match_threshold:
+            logger.info(
+                "Capture course-matching: best match below threshold for user_id=%s "
+                "(entity_id=%s score=%.4f threshold=%.4f)",
+                user_id,
+                results[0].entity_id,
+                results[0].score,
+                settings.capture_course_match_threshold,
+            )
             return None, None
         return results[0].entity_id, results[0].score
     except Exception:
