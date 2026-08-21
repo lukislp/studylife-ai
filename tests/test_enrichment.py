@@ -252,9 +252,7 @@ async def test_generate_tags_and_summary_degrades_to_empty_on_failure(
 async def test_enrich_capture_combines_course_match_and_tags_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    async def fake_match_course(
-        content: str, **_kwargs: object
-    ) -> tuple[int | None, float | None]:
+    async def fake_match_course(content: str, **_kwargs: object) -> tuple[int | None, float | None]:
         return 7, 0.88
 
     async def fake_generate(
