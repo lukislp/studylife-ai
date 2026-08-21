@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/lukislp/studylife-ai/compare/v1.13.1...v1.14.0) (2026-08-21)
+
+
+### Features
+
+* course matching via note/session fallback, scoped to active courses ([cbb6e17](https://github.com/lukislp/studylife-ai/commit/cbb6e177c7d5c1418db682c27745a5e0fe6f478b))
+
 ## [1.13.1](https://github.com/lukislp/studylife-ai/compare/v1.13.0...v1.13.1) (2026-08-21)
 
 
