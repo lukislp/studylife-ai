@@ -1,3 +1,15 @@
+# [1.12.0](https://github.com/lukislp/studylife-ai/compare/v1.11.0...v1.12.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* prevent get-version from getting permanently stuck on a stale checkout ([02590da](https://github.com/lukislp/studylife-ai/commit/02590da7473e0b655a1ef62b896b3957d55b9c42))
+
+
+### Features
+
+* add POST /internal/enrich-capture for studylife-capture S2 ([482898a](https://github.com/lukislp/studylife-ai/commit/482898a97eb81d6067e3a5e8a7ad539fed2dce41))
+
 # [1.11.0](https://github.com/lukislp/studylife-ai/compare/v1.10.0...v1.11.0) (2026-08-21)
 
 
