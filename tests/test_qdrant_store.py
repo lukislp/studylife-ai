@@ -393,3 +393,46 @@ async def test_search_filters_by_user_id_and_maps_results() -> None:
     condition = kwargs["query_filter"].must[0]
     assert condition.key == "user_id"
     assert condition.match.value == "primary"
+
+
+async def test_search_with_course_ids_adds_a_course_id_match_any_filter() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    store._client.query_points = AsyncMock(return_value=SimpleNamespace(points=[]))
+
+    await store.search(
+        vector=[0.1, 0.2], user_id="primary", limit=5, content_type="note", course_ids=[1, 2, 3]
+    )
+
+    _, kwargs = store._client.query_points.call_args
+    conditions = kwargs["query_filter"].must
+    course_condition = next(c for c in conditions if c.key == "course_id")
+    assert course_condition.match.any == [1, 2, 3]
+
+
+async def test_search_with_entity_ids_adds_an_entity_id_match_any_filter() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    store._client.query_points = AsyncMock(return_value=SimpleNamespace(points=[]))
+
+    await store.search(
+        vector=[0.1, 0.2], user_id="primary", limit=1, content_type="course", entity_ids=[10, 20]
+    )
+
+    _, kwargs = store._client.query_points.call_args
+    conditions = kwargs["query_filter"].must
+    entity_condition = next(c for c in conditions if c.key == "entity_id")
+    assert entity_condition.match.any == [10, 20]
+
+
+async def test_search_without_course_ids_or_entity_ids_omits_those_filters() -> None:
+    store = _make_store()
+    store._client.collection_exists = AsyncMock(return_value=True)
+    store._client.query_points = AsyncMock(return_value=SimpleNamespace(points=[]))
+
+    await store.search(vector=[0.1, 0.2], user_id="primary", limit=5)
+
+    _, kwargs = store._client.query_points.call_args
+    keys = [c.key for c in kwargs["query_filter"].must]
+    assert "course_id" not in keys
+    assert "entity_id" not in keys

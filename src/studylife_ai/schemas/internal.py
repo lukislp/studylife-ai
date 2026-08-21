@@ -21,6 +21,12 @@ class EnrichCaptureRequest(BaseModel):
     title: str
     content: str
     source_url: str | None = None
+    # UserSettingsDto.SelectedCourseIds from StudyLife's side - scopes course-matching to the
+    # user's currently-active courses (see rag/enrichment.py's _match_course docstring). Default
+    # empty list, not a required field, so an older StudyLife.Server build that hasn't been
+    # updated to send this yet degrades to "no active courses to match against" rather than a
+    # validation error - matches the general never-raises philosophy of this whole feature.
+    active_course_ids: list[int] = []
 
 
 class EnrichCaptureResponse(BaseModel):

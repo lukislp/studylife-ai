@@ -288,6 +288,8 @@ class QdrantStore:
         user_id: str,
         limit: int,
         content_type: ContentType | None = None,
+        course_ids: list[int] | None = None,
+        entity_ids: list[int] | None = None,
     ) -> list[RetrievedChunk]:
         """Vector search scoped to a single user (see docs/decisions.md "Retrieval design").
 
@@ -298,6 +300,20 @@ class QdrantStore:
         per content type when scoping the whole corpus, or a single call
         already scoped to one type (e.g. the M4 `search_notes` agent tool,
         which needs notes only, not courses/sessions mixed in).
+
+        `course_ids`/`entity_ids`, when given, restrict results to a specific set of ids (used
+        by rag/enrichment.py's capture course-matching, see docs/decisions.md "Course matching
+        scoped to active courses" - an inactive/completed course shouldn't win a match purely on
+        topical vocabulary overlap with a current one). These are deliberately two SEPARATE
+        filters, not one: for a note/session chunk, the *course it belongs to* lives in the
+        `course_id` payload field, but for a course chunk itself, `course_id` is always None
+        (ingestion/sync.py's `course_id=lambda _c: None` for content_type="course" - a course
+        isn't "of" a course) and the course's own id is `entity_id` instead. Pass `course_ids`
+        when filtering notes/sessions by which course they belong to; pass `entity_ids` when
+        filtering course chunks by their own id. `None` (the default, for both) leaves every
+        other caller's behavior unchanged. An empty list is NOT the same as `None` for either -
+        Qdrant's `MatchAny(any=[])` matches nothing, which is the correct behavior for "the
+        caller has zero active courses to match against".
         """
         if not await self.collection_exists():
             return []
@@ -307,6 +323,14 @@ class QdrantStore:
                 models.FieldCondition(
                     key="content_type", match=models.MatchValue(value=content_type)
                 )
+            )
+        if course_ids is not None:
+            must.append(
+                models.FieldCondition(key="course_id", match=models.MatchAny(any=course_ids))
+            )
+        if entity_ids is not None:
+            must.append(
+                models.FieldCondition(key="entity_id", match=models.MatchAny(any=entity_ids))
             )
         response = await self._client.query_points(
             collection_name=self._collection,

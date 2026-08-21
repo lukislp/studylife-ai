@@ -96,41 +96,142 @@ async def _embed_content(content: str, *, user_id: str, settings: Settings) -> l
         return None
 
 
+# How many note/session candidates _match_via_related_content fetches per content type - small
+# headroom above 1, since the single closest note/session might not have a course_id (a
+# course-less general note) even when a slightly-lower-ranked one does.
+_COURSE_FALLBACK_CANDIDATE_POOL = 5
+
+
 async def _match_course(
-    vector: list[float] | None, *, user_id: str, settings: Settings, store: QdrantStore
+    vector: list[float] | None,
+    *,
+    user_id: str,
+    note_id: int,
+    active_course_ids: list[int],
+    settings: Settings,
+    store: QdrantStore,
 ) -> tuple[int | None, float | None]:
-    """Searches the course partition of the shared Qdrant collection for the closest match (see
-    ingestion/sync.py's `render_course()` - courses are embedded the same way notes/sessions/
-    goals are, `entity_id` is the real course id). Never raises - any failure (no vector,
-    Qdrant unreachable) just leaves the capture unassigned.
+    """Resolves a course for the capture in two steps, both scoped to `active_course_ids` (the
+    StudyLife-side caller's UserSettingsDto.SelectedCourseIds - found live 2026-08-21 that
+    matching against a user's ENTIRE course history, semesters-old and completed courses
+    included, made a wrong match measurably more likely purely from topical vocabulary overlap
+    with a currently-active course; an empty `active_course_ids` means no active courses to
+    match against at all, not "match against everything"). Never raises - any failure (no
+    vector, Qdrant unreachable) just leaves the capture unassigned.
+
+    1. Direct match against the course partition (see ingestion/sync.py's `render_course()` -
+       courses are embedded the same way notes/sessions/goals are, `entity_id` is the real
+       course id). `render_course()` is deliberately sparse (name/code/semester/topics, not
+       prose) - a genuinely correct match against a prose-heavy capture can score surprisingly
+       low this way (found live 2026-08-21: a real match scored only 0.44), so this step alone
+       is too unreliable to be the only signal.
+    2. Fallback: if step 1 doesn't clear the threshold, search the user's own existing notes and
+       sessions (in that order - notes are closer in "register" to a captured article than a
+       session's own structured fields) for the closest match that already has a course
+       assigned, and inherit that course. Prose-to-prose comparison against real, already-
+       course-tagged content the user wrote themselves - much more reliable than comparing
+       against the course's own sparse metadata blurb.
 
     Both "no course found at all" and "found one but below threshold" return (None, None) - the
-    public contract deliberately doesn't distinguish them (the caller only cares "assign or
-    don't"). The two log lines below exist purely so the difference is diagnosable from logs
-    alone (found live, 2026-08-21: `course_id=None confidence=None` in the endpoint's own log
-    line is genuinely ambiguous between "zero course results" and "a near-miss just under
-    capture_course_match_threshold" - operationally very different situations)."""
+    public contract deliberately doesn't distinguish the sub-cases (the caller only cares
+    "assign or don't"); the log lines exist purely so the reason is diagnosable from logs alone
+    (found live 2026-08-21: `course_id=None confidence=None` in the endpoint's own log line is
+    genuinely ambiguous between "zero course results" and "a near-miss just under threshold" -
+    operationally very different situations)."""
     if vector is None:
         return None, None
     try:
-        results = await store.search(vector=vector, user_id=user_id, limit=1, content_type="course")
-        if not results:
-            logger.info("Capture course-matching: no course results at all for user_id=%s", user_id)
-            return None, None
-        if results[0].score < settings.capture_course_match_threshold:
+        direct_id, direct_score = await _best_direct_course_match(
+            vector, user_id=user_id, active_course_ids=active_course_ids, store=store
+        )
+        if direct_score is not None and direct_score >= settings.capture_course_match_threshold:
+            return direct_id, direct_score
+
+        fallback_id, fallback_score = await _match_course_via_related_content(
+            vector,
+            user_id=user_id,
+            note_id=note_id,
+            active_course_ids=active_course_ids,
+            settings=settings,
+            store=store,
+        )
+        if fallback_id is not None:
+            return fallback_id, fallback_score
+
+        if direct_id is not None:
             logger.info(
-                "Capture course-matching: best match below threshold for user_id=%s "
-                "(entity_id=%s score=%.4f threshold=%.4f)",
+                "Capture course-matching: best direct match below threshold for user_id=%s "
+                "(entity_id=%s score=%.4f threshold=%.4f), no note/session fallback matched either",
                 user_id,
-                results[0].entity_id,
-                results[0].score,
+                direct_id,
+                direct_score,
                 settings.capture_course_match_threshold,
             )
-            return None, None
-        return results[0].entity_id, results[0].score
+        else:
+            logger.info(
+                "Capture course-matching: no course results at all for user_id=%s, "
+                "no note/session fallback matched either",
+                user_id,
+            )
+        return None, None
     except Exception:
         logger.exception("Capture course-matching failed for user_id=%s", user_id)
         return None, None
+
+
+async def _best_direct_course_match(
+    vector: list[float], *, user_id: str, active_course_ids: list[int], store: QdrantStore
+) -> tuple[int | None, float | None]:
+    results = await store.search(
+        vector=vector,
+        user_id=user_id,
+        limit=1,
+        content_type="course",
+        entity_ids=active_course_ids,
+    )
+    if not results:
+        return None, None
+    return results[0].entity_id, results[0].score
+
+
+async def _match_course_via_related_content(
+    vector: list[float],
+    *,
+    user_id: str,
+    note_id: int,
+    active_course_ids: list[int],
+    settings: Settings,
+    store: QdrantStore,
+) -> tuple[int | None, float | None]:
+    for content_type in ("note", "session"):
+        results = await store.search(
+            vector=vector,
+            user_id=user_id,
+            limit=_COURSE_FALLBACK_CANDIDATE_POOL,
+            content_type=content_type,
+            course_ids=active_course_ids,
+        )
+        for chunk in results:
+            # Excludes the capture being enriched itself, in case it was already immediately-
+            # ingested by a previous partial run (same defensive reasoning as
+            # _find_related_notes) - only relevant for content_type="note".
+            if content_type == "note" and chunk.entity_id == note_id:
+                continue
+            if (
+                chunk.course_id is not None
+                and chunk.score >= settings.capture_course_match_threshold
+            ):
+                logger.info(
+                    "Capture course-matching: matched via existing %s (entity_id=%s "
+                    "course_id=%s score=%.4f) for user_id=%s",
+                    content_type,
+                    chunk.entity_id,
+                    chunk.course_id,
+                    chunk.score,
+                    user_id,
+                )
+                return chunk.course_id, chunk.score
+    return None, None
 
 
 async def _find_related_notes(
@@ -267,10 +368,22 @@ async def _ingest_note(
 
 
 async def enrich_capture(
-    note_id: int, title: str, content: str, *, user_id: str, settings: Settings, store: QdrantStore
+    note_id: int,
+    title: str,
+    content: str,
+    *,
+    user_id: str,
+    active_course_ids: list[int],
+    settings: Settings,
+    store: QdrantStore,
 ) -> CaptureEnrichment:
     """Never raises - every sub-step degrades to a safe default independently, so e.g. a Qdrant
     outage doesn't also block tag/summary generation, and vice versa.
+
+    `active_course_ids` scopes course-matching to the caller's currently-active courses only
+    (see _match_course's docstring) - the caller (StudyLife.Server) is the source of truth for
+    which courses are active (UserSettingsDto.SelectedCourseIds), studylife-ai has no notion of
+    "active" on its own.
 
     Course-matching, related-notes search, and tag/summary generation all run concurrently
     (independent of each other - the first two share one embedding call, the third doesn't need
@@ -279,7 +392,14 @@ async def enrich_capture(
     """
     vector = await _embed_content(content, user_id=user_id, settings=settings)
     (course_id, confidence), related_note_ids, (tags, summary) = await asyncio.gather(
-        _match_course(vector, user_id=user_id, settings=settings, store=store),
+        _match_course(
+            vector,
+            user_id=user_id,
+            note_id=note_id,
+            active_course_ids=active_course_ids,
+            settings=settings,
+            store=store,
+        ),
         _find_related_notes(vector, user_id=user_id, note_id=note_id, store=store),
         _generate_tags_and_summary(title, content, user_id=user_id, settings=settings),
     )

@@ -8,12 +8,14 @@ from studylife_ai.ingestion.qdrant_store import RetrievedChunk
 from studylife_ai.rag import enrichment as enrichment_module
 from studylife_ai.rag.enrichment import (
     CaptureEnrichment,
+    _best_direct_course_match,
     _build_prompt,
     _embed_content,
     _find_related_notes,
     _generate_tags_and_summary,
     _ingest_note,
     _match_course,
+    _match_course_via_related_content,
     _parse_response,
     enrich_capture,
 )
@@ -36,14 +38,16 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**defaults)  # type: ignore[arg-type]
 
 
-def _chunk(entity_id: int, score: float, content_type: str = "course") -> RetrievedChunk:
+def _chunk(
+    entity_id: int, score: float, content_type: str = "course", course_id: int | None = None
+) -> RetrievedChunk:
     return RetrievedChunk(
         content_type=content_type,  # type: ignore[arg-type]
         entity_id=entity_id,
         chunk_index=0,
         content="Some content",
         title="Some title",
-        course_id=None,
+        course_id=course_id,
         session_id=None,
         score=score,
         session_start=None,
@@ -112,30 +116,199 @@ async def test_embed_content_degrades_to_none_on_failure(monkeypatch: MonkeyPatc
     assert vector is None
 
 
-async def test_match_course_returns_best_match_above_threshold() -> None:
+def _match_course_kwargs(**overrides: object) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        "user_id": "alice",
+        "note_id": 99,
+        "active_course_ids": [1, 2, 3],
+        "settings": _settings(),
+        "store": AsyncMock(),
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+async def test_best_direct_course_match_scopes_search_to_active_course_ids() -> None:
     store = AsyncMock()
     store.search.return_value = [_chunk(42, 0.9)]
 
-    course_id, confidence = await _match_course(
-        [0.1, 0.2], user_id="alice", settings=_settings(), store=store
+    course_id, score = await _best_direct_course_match(
+        [0.1, 0.2], user_id="alice", active_course_ids=[1, 2, 42], store=store
     )
 
     assert course_id == 42
-    assert confidence == 0.9
+    assert score == 0.9
     assert store.search.await_args.kwargs["content_type"] == "course"
+    assert store.search.await_args.kwargs["entity_ids"] == [1, 2, 42]
 
 
-async def test_match_course_returns_none_below_threshold(caplog: LogCaptureFixture) -> None:
+async def test_best_direct_course_match_returns_none_when_no_results() -> None:
     store = AsyncMock()
-    store.search.return_value = [_chunk(42, 0.5)]
+    store.search.return_value = []
+
+    course_id, score = await _best_direct_course_match(
+        [0.1, 0.2], user_id="alice", active_course_ids=[1], store=store
+    )
+
+    assert course_id is None
+    assert score is None
+
+
+async def test_match_course_via_related_content_scopes_searches_to_active_course_ids() -> None:
+    store = AsyncMock()
+    store.search.return_value = []
+
+    await _match_course_via_related_content(
+        [0.1, 0.2],
+        user_id="alice",
+        note_id=99,
+        active_course_ids=[1, 2, 3],
+        settings=_settings(),
+        store=store,
+    )
+
+    for call in store.search.await_args_list:
+        assert call.kwargs["course_ids"] == [1, 2, 3]
+
+
+async def test_match_course_via_related_content_prefers_notes_over_sessions() -> None:
+    store = AsyncMock()
+    store.search.side_effect = [
+        [_chunk(5, 0.9, content_type="note", course_id=7)],
+        [_chunk(6, 0.95, content_type="session", course_id=8)],
+    ]
+
+    course_id, score = await _match_course_via_related_content(
+        [0.1, 0.2],
+        user_id="alice",
+        note_id=99,
+        active_course_ids=[7, 8],
+        settings=_settings(),
+        store=store,
+    )
+
+    # The note candidate wins even though the session candidate scored higher - notes are
+    # checked first (closer in "register" to a captured article, see the docstring).
+    assert course_id == 7
+    assert score == 0.9
+    assert store.search.await_count == 1
+
+
+async def test_match_course_via_related_content_falls_back_to_sessions() -> None:
+    store = AsyncMock()
+    store.search.side_effect = [
+        [_chunk(5, 0.9, content_type="note", course_id=None)],  # course-less note, skipped
+        [_chunk(6, 0.85, content_type="session", course_id=8)],
+    ]
+
+    course_id, score = await _match_course_via_related_content(
+        [0.1, 0.2],
+        user_id="alice",
+        note_id=99,
+        active_course_ids=[8],
+        settings=_settings(),
+        store=store,
+    )
+
+    assert course_id == 8
+    assert score == 0.85
+
+
+async def test_match_course_via_related_content_excludes_the_note_being_enriched() -> None:
+    store = AsyncMock()
+    store.search.side_effect = [
+        [_chunk(99, 0.95, content_type="note", course_id=7)],  # self - excluded
+        [],
+    ]
+
+    course_id, score = await _match_course_via_related_content(
+        [0.1, 0.2],
+        user_id="alice",
+        note_id=99,
+        active_course_ids=[7],
+        settings=_settings(),
+        store=store,
+    )
+
+    assert course_id is None
+    assert score is None
+
+
+async def test_match_course_via_related_content_respects_threshold() -> None:
+    store = AsyncMock()
+    store.search.side_effect = [
+        [_chunk(5, 0.5, content_type="note", course_id=7)],  # below threshold
+        [_chunk(6, 0.5, content_type="session", course_id=8)],  # below threshold
+    ]
+
+    course_id, score = await _match_course_via_related_content(
+        [0.1, 0.2],
+        user_id="alice",
+        note_id=99,
+        active_course_ids=[7, 8],
+        settings=_settings(capture_course_match_threshold=0.75),
+        store=store,
+    )
+
+    assert course_id is None
+    assert score is None
+
+
+async def test_match_course_returns_best_direct_match_above_threshold(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def fake_direct(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return 42, 0.9
+
+    fallback_calls = []
+
+    async def fake_fallback(vector: object, **kwargs: object) -> tuple[int | None, float | None]:
+        fallback_calls.append(kwargs)
+        return None, None
+
+    monkeypatch.setattr(enrichment_module, "_best_direct_course_match", fake_direct)
+    monkeypatch.setattr(enrichment_module, "_match_course_via_related_content", fake_fallback)
+
+    course_id, confidence = await _match_course([0.1, 0.2], **_match_course_kwargs())
+
+    assert course_id == 42
+    assert confidence == 0.9
+    # A confident direct match must short-circuit - no need to pay for the fallback searches.
+    assert fallback_calls == []
+
+
+async def test_match_course_falls_back_when_direct_match_below_threshold(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def fake_direct(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return 42, 0.44
+
+    async def fake_fallback(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return 7, 0.85
+
+    monkeypatch.setattr(enrichment_module, "_best_direct_course_match", fake_direct)
+    monkeypatch.setattr(enrichment_module, "_match_course_via_related_content", fake_fallback)
+
+    course_id, confidence = await _match_course([0.1, 0.2], **_match_course_kwargs())
+
+    assert course_id == 7
+    assert confidence == 0.85
+
+
+async def test_match_course_returns_none_when_direct_and_fallback_both_fail(
+    monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    async def fake_direct(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return 42, 0.44
+
+    async def fake_fallback(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return None, None
+
+    monkeypatch.setattr(enrichment_module, "_best_direct_course_match", fake_direct)
+    monkeypatch.setattr(enrichment_module, "_match_course_via_related_content", fake_fallback)
 
     with caplog.at_level(logging.INFO):
-        course_id, confidence = await _match_course(
-            [0.1, 0.2],
-            user_id="alice",
-            settings=_settings(capture_course_match_threshold=0.75),
-            store=store,
-        )
+        course_id, confidence = await _match_course([0.1, 0.2], **_match_course_kwargs())
 
     assert course_id is None
     assert confidence is None
@@ -144,17 +317,23 @@ async def test_match_course_returns_none_below_threshold(caplog: LogCaptureFixtu
     # case and "no course results at all" - see _match_course's docstring).
     assert "below threshold" in caplog.text
     assert "entity_id=42" in caplog.text
-    assert "score=0.5000" in caplog.text
+    assert "score=0.4400" in caplog.text
 
 
-async def test_match_course_returns_none_when_no_results(caplog: LogCaptureFixture) -> None:
-    store = AsyncMock()
-    store.search.return_value = []
+async def test_match_course_returns_none_when_no_results_anywhere(
+    monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    async def fake_direct(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return None, None
+
+    async def fake_fallback(vector: object, **_kwargs: object) -> tuple[int | None, float | None]:
+        return None, None
+
+    monkeypatch.setattr(enrichment_module, "_best_direct_course_match", fake_direct)
+    monkeypatch.setattr(enrichment_module, "_match_course_via_related_content", fake_fallback)
 
     with caplog.at_level(logging.INFO):
-        course_id, confidence = await _match_course(
-            [0.1, 0.2], user_id="alice", settings=_settings(), store=store
-        )
+        course_id, confidence = await _match_course([0.1, 0.2], **_match_course_kwargs())
 
     assert course_id is None
     assert confidence is None
@@ -164,9 +343,7 @@ async def test_match_course_returns_none_when_no_results(caplog: LogCaptureFixtu
 async def test_match_course_returns_none_without_a_vector() -> None:
     store = AsyncMock()
 
-    course_id, confidence = await _match_course(
-        None, user_id="alice", settings=_settings(), store=store
-    )
+    course_id, confidence = await _match_course(None, **_match_course_kwargs(store=store))
 
     assert course_id is None
     assert confidence is None
@@ -177,9 +354,7 @@ async def test_match_course_degrades_to_none_on_search_failure() -> None:
     store = AsyncMock()
     store.search.side_effect = RuntimeError("qdrant unreachable")
 
-    course_id, confidence = await _match_course(
-        [0.1, 0.2], user_id="alice", settings=_settings(), store=store
-    )
+    course_id, confidence = await _match_course([0.1, 0.2], **_match_course_kwargs(store=store))
 
     assert course_id is None
     assert confidence is None
@@ -392,7 +567,13 @@ async def test_enrich_capture_combines_all_sub_steps(monkeypatch: MonkeyPatch) -
     monkeypatch.setattr(enrichment_module, "_ingest_note", fake_ingest)
 
     result = await enrich_capture(
-        99, "Title", "Content", user_id="alice", settings=_settings(), store=AsyncMock()
+        99,
+        "Title",
+        "Content",
+        user_id="alice",
+        active_course_ids=[1, 2, 3],
+        settings=_settings(),
+        store=AsyncMock(),
     )
 
     assert result == CaptureEnrichment(

@@ -103,6 +103,7 @@ async def enrich_capture_endpoint(
         request.title,
         request.content,
         user_id=request.user_id,
+        active_course_ids=request.active_course_ids,
         settings=settings,
         store=http_request.app.state.qdrant_store,
     )
