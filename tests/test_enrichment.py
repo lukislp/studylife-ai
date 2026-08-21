@@ -1,6 +1,7 @@
+import logging
 from unittest.mock import AsyncMock
 
-from pytest import MonkeyPatch
+from pytest import LogCaptureFixture, MonkeyPatch
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import RetrievedChunk
@@ -124,31 +125,40 @@ async def test_match_course_returns_best_match_above_threshold() -> None:
     assert store.search.await_args.kwargs["content_type"] == "course"
 
 
-async def test_match_course_returns_none_below_threshold() -> None:
+async def test_match_course_returns_none_below_threshold(caplog: LogCaptureFixture) -> None:
     store = AsyncMock()
     store.search.return_value = [_chunk(42, 0.5)]
 
-    course_id, confidence = await _match_course(
-        [0.1, 0.2],
-        user_id="alice",
-        settings=_settings(capture_course_match_threshold=0.75),
-        store=store,
-    )
+    with caplog.at_level(logging.INFO):
+        course_id, confidence = await _match_course(
+            [0.1, 0.2],
+            user_id="alice",
+            settings=_settings(capture_course_match_threshold=0.75),
+            store=store,
+        )
 
     assert course_id is None
     assert confidence is None
+    # The near-miss score/entity must be diagnosable from logs alone (found live 2026-08-21:
+    # "course_id=None confidence=None" in the endpoint's own log line is ambiguous between this
+    # case and "no course results at all" - see _match_course's docstring).
+    assert "below threshold" in caplog.text
+    assert "entity_id=42" in caplog.text
+    assert "score=0.5000" in caplog.text
 
 
-async def test_match_course_returns_none_when_no_results() -> None:
+async def test_match_course_returns_none_when_no_results(caplog: LogCaptureFixture) -> None:
     store = AsyncMock()
     store.search.return_value = []
 
-    course_id, confidence = await _match_course(
-        [0.1, 0.2], user_id="alice", settings=_settings(), store=store
-    )
+    with caplog.at_level(logging.INFO):
+        course_id, confidence = await _match_course(
+            [0.1, 0.2], user_id="alice", settings=_settings(), store=store
+        )
 
     assert course_id is None
     assert confidence is None
+    assert "no course results at all" in caplog.text
 
 
 async def test_match_course_returns_none_without_a_vector() -> None:

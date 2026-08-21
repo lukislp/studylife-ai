@@ -46,6 +46,30 @@ spec:
       ports:
         - { protocol: TCP, port: 8000 }
 ---
+# Found live (2026-08-21): studylife-capture's capture-enrichment background task
+# (StudyLife.Server's BackgroundTaskService.CaptureEnrichment, running in the studylife-worker
+# deployment, NOT studylife-web) calls POST /internal/enrich-capture directly from the worker
+# process - every AI feature before this one (chat/agent proxying, key registration) was
+# triggered synchronously from a user's own HTTP request and therefore always ran in
+# studylife-web, so this is a genuinely new caller identity this policy never anticipated.
+# Without this rule, the connection is actively refused (default-deny-ingress above + no
+# matching allow rule), which surfaces as a silent, permanent capture-enrichment failure - the
+# call never even reaches this app's HTTP layer, so nothing shows up in its own request logs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-studylife-worker-to-app
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: studylife-ai } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: studylife-worker } }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
 # Metrics dashboard (see docs/decisions.md "Metrics dashboard"): studylife's own Prometheus
 # (studylife repo's k8s/14-prometheus.yaml, "studylife-ai" scrape job) lives in a different
 # namespace/cluster-app entirely, so it needs its own explicit ingress allowance on the same
