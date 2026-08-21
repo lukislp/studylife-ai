@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/lukislp/studylife-ai/compare/v1.12.0...v1.13.0) (2026-08-21)
+
+
+### Features
+
+* related notes + immediate ingestion for capture enrichment (S3) ([fa84be5](https://github.com/lukislp/studylife-ai/commit/fa84be5bf0c70c5a2f39d08e68a663534d5d57ae))
+
 # [1.12.0](https://github.com/lukislp/studylife-ai/compare/v1.11.0...v1.12.0) (2026-08-21)
 
 
