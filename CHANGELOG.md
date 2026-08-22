@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/lukislp/studylife-ai/compare/v1.14.0...v1.15.0) (2026-08-22)
+
+
+### Features
+
+* own this repo's Flux GitOps wiring ([3a99aa5](https://github.com/lukislp/studylife-ai/commit/3a99aa5299ac4e5d9c3f83b3156cb641a3c1cfc0))
+
 # [1.14.0](https://github.com/lukislp/studylife-ai/compare/v1.13.1...v1.14.0) (2026-08-21)
 
 
