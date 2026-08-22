@@ -269,6 +269,7 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **Metrics dashboard** — LLM cost/latency/token Prometheus metrics, per-user cost attribution, scraped by the existing self-hosted Prometheus and visualized in its own Grafana folder (see [Observability](#observability) and [docs/decisions.md](docs/decisions.md) "Metrics dashboard").
 - [x] **Note Markdown rendering** — StudyLife's `NoteDto` gained `isMarkdown`; notes written in Markdown mode are now rendered to plain text before chunking/embedding, so raw syntax doesn't leak into RAG answers (see [docs/decisions.md](docs/decisions.md) "Note Markdown rendering").
 - [x] **Capture enrichment** — `POST /internal/enrich-capture` for the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension: course matching scoped to active courses with a note/session fallback, tags, summary, related notes, immediate indexing. Production-verified, including a live `NetworkPolicy` fix. See [Capture enrichment](#capture-enrichment).
+- [ ] **Capture enrichment accuracy measurement** — course-match/tag/summary quality across a larger set of real [studylife-capture](https://github.com/lukislp/studylife-capture) captures, beyond the single production case verified so far.
 
 ## Tech stack
 
