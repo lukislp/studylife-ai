@@ -1,0 +1,10 @@
+# Scans GHCR for new tags of this repo's image (.github/workflows/ci.yml "docker" job). Public
+# package - no secretRef needed.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: studylife-ai
+  namespace: flux-system
+spec:
+  image: ghcr.io/lukislp/studylife-ai
+  interval: 5m

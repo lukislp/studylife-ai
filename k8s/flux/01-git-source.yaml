@@ -1,0 +1,23 @@
+# Points Flux at this repo. Needs write access (not just read), since
+# image-automation-controller pushes commits for new image tags directly to main (see
+# 04-image-update-automation.yaml). Reuses the cluster-wide "studylife-git-auth" secret
+# (flux-system namespace, managed in the homelab-infra repo) rather than a repo-specific one - a
+# classic GitHub PAT (public_repo scope), which GitHub never scopes to a single repo anyway, so
+# it already covers this repo too. Trade-off accepted: every GitRepository on this cluster shares
+# one credential, so rotating/revoking it affects all of them at once - acceptable for a personal
+# homelab setup, not something a stricter multi-tenant setup should copy without reconsidering.
+#
+# Previously defined in studylife's own k8s/flux/06-studylife-ai-git-source.yaml - moved here so
+# this repo owns its own Flux wiring instead of studylife managing it on this repo's behalf.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: studylife-ai
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/lukislp/studylife-ai.git
+  ref:
+    branch: main
+  secretRef:
+    name: studylife-git-auth
