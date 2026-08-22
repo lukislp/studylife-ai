@@ -246,7 +246,7 @@ The same callback also records the identical data as Prometheus metrics (`llm/me
 | `studylife_ai_llm_latency_seconds` | Histogram | `call_site`, `model`, `user_id` | p50/p95/p99 latency |
 | `studylife_ai_llm_prompt_tokens_total` / `..._completion_tokens_total` | Counter | `call_site`, `model`, `user_id` | Token usage |
 
-Scraped by the existing self-hosted Prometheus in the StudyLife repo (`k8s/14-prometheus.yaml`, `job_name: studylife-ai`) and visualized in its own Grafana folder ("StudyLife AI", `k8s/17b-grafana-dashboards.yaml`) - deliberately separate from the main "StudyLife" dashboard folder, since this is a different service with its own repo/release cycle.
+Scraped by the existing self-hosted Prometheus in the homelab-infra repo (`monitoring/01-prometheus.yaml`, `job_name: studylife-ai`) and visualized in its own Grafana folder ("StudyLife AI", `monitoring/05-grafana-dashboards.yaml`) - deliberately separate from the main "StudyLife" dashboard folder, since this is a different service with its own repo/release cycle.
 
 ## Deployment
 
