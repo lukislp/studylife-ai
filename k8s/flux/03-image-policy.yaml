@@ -1,0 +1,13 @@
+# Selects the "newest" tag by SemVer - this repo's own .releaserc.json pushes plain SemVer tags
+# without a "v" prefix via semantic-release, which Flux's standard SemVer policy parses directly.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: studylife-ai
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: studylife-ai
+  policy:
+    semver:
+      range: ">=0.0.0"
