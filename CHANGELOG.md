@@ -1,3 +1,10 @@
+## [1.15.3](https://github.com/lukislp/studylife-ai/compare/v1.15.2...v1.15.3) (2026-08-24)
+
+
+### Performance Improvements
+
+* **ci:** native per-arch docker builds instead of QEMU emulation ([91b37be](https://github.com/lukislp/studylife-ai/commit/91b37beb4fbda3462d6c7dcd396d00334f6d7192))
+
 ## [1.15.2](https://github.com/lukislp/studylife-ai/compare/v1.15.1...v1.15.2) (2026-08-24)
 
 
