@@ -31,6 +31,11 @@ spec:
   template:
     metadata:
       labels: {app: studylife-ai}
+      annotations:
+        # Opt-in to homelab-infra's nightly Velero PVC backup: /app/data holds
+        # agent_checkpoints.db (LangGraph session state). Borderline-valuable, but the
+        # backup costs kilobytes. Crash-consistent copy, accepted like qdrant's.
+        backup.velero.io/backup-volumes: data
     spec:
       automountServiceAccountToken: false
       securityContext:
