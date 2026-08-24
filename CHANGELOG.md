@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/lukislp/studylife-ai/compare/v1.15.0...v1.15.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **k8s:** pin qdrant and run it as non-root ([4bc3655](https://github.com/lukislp/studylife-ai/commit/4bc3655a49625ec2f86c81889d8b4f56c75e5b90))
+
 # [1.15.0](https://github.com/lukislp/studylife-ai/compare/v1.14.0...v1.15.0) (2026-08-22)
 
 
