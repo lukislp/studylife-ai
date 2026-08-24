@@ -33,6 +33,12 @@ spec:
   template:
     metadata:
       labels: { app: qdrant }
+      annotations:
+        # Opt-in to homelab-infra's nightly Velero PVC backup (cluster/10-velero-values.yaml
+        # there): the embeddings in studylife_notes are re-derivable from Postgres at worst,
+        # but a restore from last night beats hours of re-embedding API calls. The copy is
+        # crash-consistent (no quiesce hook) - accepted, 7 independent nightly states.
+        backup.velero.io/backup-volumes: storage
     spec:
       automountServiceAccountToken: false
       securityContext:
