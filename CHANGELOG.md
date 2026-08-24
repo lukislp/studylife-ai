@@ -1,3 +1,11 @@
+## [1.15.2](https://github.com/lukislp/studylife-ai/compare/v1.15.1...v1.15.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **k8s:** opt the agent-checkpoint volume into the nightly backup too ([ccd0a50](https://github.com/lukislp/studylife-ai/commit/ccd0a507ebfa961fe5d6f15c25f10b71cafaad60))
+* **k8s:** opt the qdrant volume into the nightly Velero backup ([c55bbe7](https://github.com/lukislp/studylife-ai/commit/c55bbe74e1eb4b8fc5591089aa81f900be6c6591))
+
 ## [1.15.1](https://github.com/lukislp/studylife-ai/compare/v1.15.0...v1.15.1) (2026-08-24)
 
 
