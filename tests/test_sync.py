@@ -8,6 +8,7 @@ from studylife_ai.config import Settings
 from studylife_ai.ingestion import sync as sync_module
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
+from tests.conftest import TEST_AI_KEY_ENCRYPTION_KEY
 
 
 def _settings(**overrides: object) -> Settings:
@@ -30,11 +31,11 @@ async def _install_registered_users(monkeypatch: MonkeyPatch, users: dict[str, s
     with the given {user_id: ai_api_key} pairs instead of touching a real
     file. sync_all() calls .setup() on it too, which is a harmless no-op
     against an already-set-up store (CREATE TABLE IF NOT EXISTS)."""
-    store = RegisteredKeyStore(":memory:")
+    store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
     await store.setup()
     for user_id, ai_api_key in users.items():
         await store.set(user_id, ai_api_key)
-    monkeypatch.setattr(sync_module, "RegisteredKeyStore", lambda db_path: store)
+    monkeypatch.setattr(sync_module, "RegisteredKeyStore", lambda db_path, encryption_key: store)
 
 
 def _note(note_id: int, title: str, content: str, *, is_markdown: bool = False) -> StudyLifeNote:

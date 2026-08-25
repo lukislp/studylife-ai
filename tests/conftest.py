@@ -1,9 +1,22 @@
+import os
 import time
 from collections.abc import AsyncIterator
 
 import pytest
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from pytest import MonkeyPatch
+
+# A4: AI_KEY_ENCRYPTION_KEY is required for RegisteredKeyStore to construct at all (see
+# config.py, registered_keys.py) - must be set before `studylife_ai.main` is imported anywhere,
+# since importing it calls create_app() -> get_settings() at module load time, which the real
+# app lifespan (see the `client` fixture below) feeds straight into RegisteredKeyStore. conftest
+# modules are always collected before any test module in the same directory, so setting this
+# here (module level, not inside a fixture) guarantees a valid key is already present by the
+# time any test file does `from studylife_ai.main import app`. setdefault, not a plain
+# assignment, so a real key already set in the environment/.env for local dev is respected
+# rather than overridden.
+os.environ.setdefault("AI_KEY_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 from studylife_ai.api.identity import PROXY_TOKEN_HEADER, _sign
 from studylife_ai.config import Settings
@@ -12,6 +25,10 @@ from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 TEST_USER_ID = "test-user"
 TEST_SHARED_SECRET = "test-shared-secret"
+# Whatever AI_KEY_ENCRYPTION_KEY resolved to above (either a real one from the environment/.env,
+# or the freshly generated fallback) - reused by tests that construct their own RegisteredKeyStore
+# directly (this file's `client` fixture below, tests/test_registered_keys.py).
+TEST_AI_KEY_ENCRYPTION_KEY = os.environ["AI_KEY_ENCRYPTION_KEY"]
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +97,7 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
         # in-memory one so tests never touch real data and each test starts
         # with a clean, empty registry.
         real_store = app.state.registered_key_store
-        test_store = RegisteredKeyStore(":memory:")
+        test_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
         await test_store.setup()
         app.state.registered_key_store = test_store
         try:

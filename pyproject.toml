@@ -26,6 +26,11 @@ dependencies = [
     # dependency of langgraph-checkpoint-sqlite - declared explicitly so it
     # isn't an undeclared import.
     "aiosqlite>=0.20",
+    # A4 (see docs/decisions.md "A4 registered-keys encryption at rest"): registered_keys.py
+    # encrypts each stored AiApiKey with Fernet. Already pulled in transitively (via
+    # langchain-litellm), but declared explicitly since it's now a direct import, not just an
+    # undeclared transitive one - same reasoning as aiosqlite above.
+    "cryptography>=44",
     # Metrics dashboard (see docs/decisions.md "Metrics dashboard"): exposes /metrics for the
     # existing self-hosted Prometheus (studylife repo's k8s/14-prometheus.yaml) to scrape -
     # wraps prometheus_client with FastAPI HTTP auto-instrumentation (request rate/latency/
