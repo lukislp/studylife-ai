@@ -27,7 +27,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         url=settings.qdrant_url, collection=settings.qdrant_collection
     )
 
-    registered_key_store = RegisteredKeyStore(settings.registered_keys_db_path)
+    registered_key_store = RegisteredKeyStore(
+        settings.registered_keys_db_path, settings.ai_key_encryption_key
+    )
     await registered_key_store.setup()
     app.state.registered_key_store = registered_key_store
 

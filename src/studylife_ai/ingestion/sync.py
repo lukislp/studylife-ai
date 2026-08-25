@@ -264,7 +264,9 @@ async def sync_all(settings: Settings) -> None:
         raise RuntimeError("STUDYLIFE_API_BASE_URL must be set to run ingestion.")
 
     store = QdrantStore(url=settings.qdrant_url, collection=settings.qdrant_collection)
-    registered_keys = RegisteredKeyStore(settings.registered_keys_db_path)
+    registered_keys = RegisteredKeyStore(
+        settings.registered_keys_db_path, settings.ai_key_encryption_key
+    )
     try:
         await registered_keys.setup()
         user_ids = await registered_keys.list_user_ids()

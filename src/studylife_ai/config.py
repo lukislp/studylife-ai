@@ -188,6 +188,17 @@ class Settings(BaseSettings):
     # manually-maintained INGESTION_USERS list).
     registered_keys_db_path: str = "registered_keys.db"
 
+    # Fernet key (32 url-safe base64-encoded bytes, e.g. via
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
+    # encrypting each registered AiApiKey at rest in registered_keys_db_path (audit finding A4,
+    # 2026-08-25) - every row there is a full, usable StudyLife account credential (unlike
+    # StudyLife's own hash-only key storage), so plaintext SQLite storage was a real exposure.
+    # No default on purpose: RegisteredKeyStore.__init__ fails loudly at startup (both the app's
+    # lifespan and ingestion's sync_all() entrypoint) if this is missing or not a valid Fernet
+    # key, same "fail loud rather than silently point nowhere" convention as
+    # studylife_shared_secret - see docs/decisions.md.
+    ai_key_encryption_key: str | None = None
+
     # Rate limiting (see docs/decisions.md "Rate limiting"): a fixed-window counter per
     # resolved user_id, guarding /chat and /agent /agent-confirm - the endpoints that incur
     # real LLM cost. Defends against a leaked token or a client-side bug (e.g. a retry loop)
