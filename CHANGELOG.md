@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/lukislp/studylife-ai/compare/v1.15.3...v1.16.0) (2026-08-25)
+
+
+### Features
+
+* move data volumes to Longhorn for cross-node replication ([ea27b74](https://github.com/lukislp/studylife-ai/commit/ea27b74e795371fa7b5e49b6626eb1bb8b0c866f))
+
 ## [1.15.3](https://github.com/lukislp/studylife-ai/compare/v1.15.2...v1.15.3) (2026-08-24)
 
 
