@@ -1,3 +1,10 @@
+## [1.16.1](https://github.com/lukislp/studylife-ai/compare/v1.16.0...v1.16.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* encrypt registered AiApiKeys at rest with Fernet ([f781b57](https://github.com/lukislp/studylife-ai/commit/f781b57ed0885e67d963eb1b52971481e7eb1ed9))
+
 # [1.16.0](https://github.com/lukislp/studylife-ai/compare/v1.15.3...v1.16.0) (2026-08-25)
 
 
