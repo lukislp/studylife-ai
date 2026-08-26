@@ -1,14 +1,18 @@
-"""Serves `api/internal.py`'s routes on a second, dedicated port (audit O6-ai, 2026-08-26 - see
-docs/decisions.md "F15/O6-ai: chat model allowlist, metrics token gate, /internal port split").
+"""Serves `api/internal.py`'s routes on their own dedicated port (audit O6-ai, 2026-08-26 - see
+docs/decisions.md "F15/O6-ai: chat model allowlist, metrics token gate, /internal port split" and
+its phase-B follow-up completing the cutover).
 
-`/internal/*` (register-key, revoke-key, enrich-capture) shares the public port with `/chat`,
-`/agent`, and `/metrics` today - the only guards are the `X-StudyLife-Shared-Secret` bearer check
-in `api/internal.py` and a k8s `NetworkPolicy` that, because it's scoped to the whole shared
-port, necessarily also admits every other caller of anything else on that port (e.g. Prometheus,
-which only needs `/metrics` - see `k8s/05-network-policies.yaml`'s `allow-prometheus-to-app`).
-Splitting `/internal/*` onto its own port lets a `NetworkPolicy` scope ingress to just
-StudyLife's own backend pods (`studylife-web`/`studylife-worker`), tighter than what the shared
-port can express, without a second process/container/image/Deployment.
+`/internal/*` (register-key, revoke-key, enrich-capture) is served ONLY here, on
+`settings.internal_api_port` - NOT on the shared public port at all (see `main.py::create_app`,
+which no longer includes `internal.router`). Before this port split, `/internal/*` shared the
+public port with `/chat`, `/agent`, and `/metrics`, guarded only by the
+`X-StudyLife-Shared-Secret` bearer check in `api/internal.py` and a k8s `NetworkPolicy` that,
+being scoped to the whole shared port, necessarily also admitted every other caller of anything
+else on that port (e.g. Prometheus, which only needs `/metrics` - see
+`k8s/05-network-policies.yaml`'s `allow-prometheus-to-app`). Serving `/internal/*` on its own
+port lets a `NetworkPolicy` scope ingress to just StudyLife's own backend pods
+(`studylife-web`/`studylife-worker`), tighter than what the shared port can express, without a
+second process/container/image/Deployment.
 
 `create_internal_app()` builds a second, minimal FastAPI app carrying ONLY `internal.router` -
 no `/chat`/`/agent`/`/metrics`/`/health`, so a `NetworkPolicy` scoped to this port can't reach
@@ -19,21 +23,20 @@ built (not fresh copies - two independent SQLite connections to the same file, i
 process, would be redundant, not safer), and runs it via `build_internal_server` +
 `serve_internal_app` as a second `uvicorn.Server` task on the same event loop.
 
-Transition period: `internal.router` is ALSO still included on the main app (see `main.py`),
-with an extra dependency (`log_deprecated_main_port_access` below) that only that inclusion
-gets - `include_router(router, dependencies=[...])` applies the given dependencies to just that
-one inclusion, not to the router object itself, so `create_internal_app()`'s own inclusion above
-never logs anything. This keeps StudyLife's backend working unchanged regardless of whether it
-(or this service's own k8s manifests) have switched over to `INTERNAL_API_PORT` yet, in either
-order. Drop the second `include_router` call on the main app (and this module's deprecation
-dependency) once that warning has gone quiet in production logs for a full StudyLife release
-cycle.
+Transition history, not current behavior: for one release, `internal.router` was ALSO included
+on the main app (`app.include_router(internal.router, dependencies=[Depends(
+log_deprecated_main_port_access)])`), so StudyLife's backend kept working unchanged whether or
+not it had switched over to calling `INTERNAL_API_PORT` yet, in either deploy order - each hit
+logged a deprecation warning via a dependency that only that inclusion got, never
+`create_internal_app()`'s own inclusion of the same router. That fallback inclusion and the
+`log_deprecated_main_port_access` dependency were removed once StudyLife's own release that
+calls the dedicated port shipped - see docs/decisions.md for the exact sequencing.
 """
 
 import logging
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 
 from studylife_ai.api import internal
 from studylife_ai.config import Settings
@@ -102,17 +105,19 @@ async def serve_internal_app(server: uvicorn.Server) -> None:
     `sys.exit()` - since this coroutine runs as a background `asyncio.Task` (see main.py's
     `_lifespan`), an uncaught `SystemExit` there would otherwise be free to crash the WHOLE
     process, taking `/chat`/`/agent` on the main port down with it over a problem confined to
-    the dedicated internal port - which is still serving `/internal/*` regardless (see
-    `main.py::create_app`'s transition-period `include_router`). Degrading to "the dedicated
-    port never came up, main port still works" is strictly better than a hard crash here.
+    the dedicated internal port. Since the main port no longer serves `/internal/*` at all (see
+    `main.py::create_app`), that surface is genuinely unreachable until the next restart in this
+    case - but degrading to "the dedicated port never came up, so `/internal/*` is down but
+    `/chat`/`/agent` on the main port still work" is still strictly better than a hard crash that
+    takes the whole process down over a problem confined to this one port.
     """
     try:
         await server.startup()
     except SystemExit:
         logger.error(
-            "Failed to start the dedicated internal-api server on port %d - /internal/* stays "
-            "reachable on the main port for the rest of this process (see main.py); this is "
-            "not retried until the next restart.",
+            "Failed to start the dedicated internal-api server on port %d - /internal/* is "
+            "unreachable for the rest of this process (the main port no longer serves it, see "
+            "main.py); this is not retried until the next restart.",
             server.config.port,
         )
         return
@@ -120,18 +125,3 @@ async def serve_internal_app(server: uvicorn.Server) -> None:
         await server.main_loop()
     finally:
         await server.shutdown()
-
-
-def log_deprecated_main_port_access(request: Request) -> None:
-    """FastAPI dependency added ONLY where the main app includes `internal.router` (see
-    `main.py`) - `create_internal_app()`'s own inclusion above never gets this, so a request
-    served on the dedicated internal port never logs it. Logs every hit, not just once: an
-    operator watching for "has StudyLife's backend actually switched over to
-    INTERNAL_API_PORT yet" wants to see this line stop appearing entirely, not merely appear
-    once at process start."""
-    logger.warning(
-        "Deprecated: %s %s served on the shared public port - StudyLife's backend should call "
-        "the dedicated internal port instead (see INTERNAL_API_PORT in README.md).",
-        request.method,
-        request.url.path,
-    )

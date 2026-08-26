@@ -1,5 +1,7 @@
-"""Audit O6-ai: /internal/* served on its own dedicated port (internal_server.py), in addition
-to the shared public port (main.py), for one transition release.
+"""Audit O6-ai: /internal/* served exclusively on its own dedicated port (internal_server.py) -
+NOT on the shared public port (main.py). Phase B (see docs/decisions.md "F15/O6-ai phase B:
+/internal off the main port") removed the transition-period fallback that used to also serve it
+on the main port with a deprecation warning.
 
 Unlike the rest of the suite, `test_internal_app_is_reachable_on_a_real_second_port` and
 `test_serve_internal_app_stops_gracefully_when_should_exit_is_set` below deliberately don't use
@@ -138,9 +140,9 @@ async def test_hitting_internal_routes_on_the_dedicated_port_does_not_log_the_de
 async def test_serve_internal_app_logs_and_returns_instead_of_crashing_on_a_bind_failure(
     running_internal_server: RunningInternalServer, caplog: LogCaptureFixture
 ) -> None:
-    """A port conflict must degrade to "the dedicated port never came up", not take down the
-    whole process (see serve_internal_app's own docstring) - /internal/* would still be
-    reachable on the main port regardless. `running_internal_server` is already bound to a real
+    """A port conflict must degrade to "the dedicated port never came up" (/internal/* down,
+    but /chat and /agent on the main port unaffected), not take down the whole process (see
+    serve_internal_app's own docstring). `running_internal_server` is already bound to a real
     port; building a second server for that exact same port and starting it reproduces a
     genuine uvicorn.Server.startup() bind failure (OSError -> sys.exit internally), not a mock."""
     _server, base_url = running_internal_server
@@ -196,35 +198,21 @@ async def test_serve_internal_app_stops_gracefully_when_should_exit_is_set(
     await internal_app.state.registered_key_store.close()
 
 
-# --- Main app: /internal/* still served on the shared public port too, with a deprecation log
-# (main.py's include_router(internal.router, dependencies=[Depends(log_deprecated_...)])). ---
+# --- Main app: /internal/* is no longer served there at all (phase B) - a plain 404, same as
+# any other undefined route. ---
 
 
-async def test_hitting_internal_routes_on_the_main_app_logs_a_deprecation_warning(
-    client: AsyncClient, caplog: LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="studylife_ai.internal_server"):
+async def test_internal_routes_404_on_the_main_app(client: AsyncClient) -> None:
+    """Phase B (see docs/decisions.md "F15/O6-ai phase B: /internal off the main port") removed
+    `internal.router` from the main app entirely - it's now served ONLY on the dedicated
+    internal port (see `test_internal_app_is_reachable_on_a_real_second_port` above and
+    tests/test_internal.py's business-logic matrix, which exercises this same router mounted the
+    same way via the `internal_client` fixture). A request to any of these paths on the main
+    app's port must 404 regardless of the shared secret - there's no route left to reject it."""
+    for path in ("/internal/register-key", "/internal/revoke-key", "/internal/enrich-capture"):
         response = await client.post(
-            "/internal/register-key",
-            json={"user_id": "alice", "ai_api_key": "key-a"},
+            path,
+            json={"user_id": "alice"},
             headers={"X-StudyLife-Shared-Secret": TEST_SHARED_SECRET},
         )
-
-    assert response.status_code == 200
-    assert "Deprecated" in caplog.text
-    assert "/internal/register-key" in caplog.text
-
-
-async def test_main_app_internal_routes_still_work_exactly_as_before_the_split(
-    client: AsyncClient,
-) -> None:
-    """Existing functionality unchanged: the main app's own /internal/* behavior (already
-    covered in depth by tests/test_internal.py) is untouched by the port split - this is just a
-    sanity check that the extra dependency doesn't otherwise interfere."""
-    response = await client.post(
-        "/internal/register-key",
-        json={"user_id": "alice", "ai_api_key": "key-a"},
-        headers={"X-StudyLife-Shared-Secret": "wrong-secret"},
-    )
-
-    assert response.status_code == 401
+        assert response.status_code == 404, f"POST {path} should not exist on the main app"

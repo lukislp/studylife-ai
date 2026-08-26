@@ -14,8 +14,8 @@ from studylife_ai.rag.enrichment import CaptureEnrichment
 from tests.conftest import TEST_SHARED_SECRET
 
 
-async def test_register_key_stores_the_key(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_register_key_stores_the_key(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -25,10 +25,10 @@ async def test_register_key_stores_the_key(client: AsyncClient) -> None:
     assert await app.state.registered_key_store.get("alice") == "key-a"
 
 
-async def test_register_key_overwrites_an_existing_entry(client: AsyncClient) -> None:
+async def test_register_key_overwrites_an_existing_entry(internal_client: AsyncClient) -> None:
     await app.state.registered_key_store.set("alice", "old-key")
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "new-key"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -38,8 +38,8 @@ async def test_register_key_overwrites_an_existing_entry(client: AsyncClient) ->
     assert await app.state.registered_key_store.get("alice") == "new-key"
 
 
-async def test_register_key_rejects_a_wrong_secret(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_register_key_rejects_a_wrong_secret(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: "wrong-secret"},
@@ -49,8 +49,8 @@ async def test_register_key_rejects_a_wrong_secret(client: AsyncClient) -> None:
     assert await app.state.registered_key_store.get("alice") is None
 
 
-async def test_register_key_rejects_a_missing_secret(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_register_key_rejects_a_missing_secret(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/register-key", json={"user_id": "alice", "ai_api_key": "key-a"}
     )
 
@@ -58,14 +58,14 @@ async def test_register_key_rejects_a_missing_secret(client: AsyncClient) -> Non
 
 
 async def test_register_key_returns_503_when_secret_not_configured(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "studylife_ai.api.internal.get_settings",
         lambda: Settings(studylife_shared_secret=None),  # type: ignore[arg-type]
     )
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -79,7 +79,7 @@ async def test_register_key_returns_503_when_secret_not_configured(
 
 
 async def test_register_key_accepts_the_new_internal_api_secret(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "studylife_ai.api.internal.get_settings",
@@ -88,7 +88,7 @@ async def test_register_key_accepts_the_new_internal_api_secret(
         ),
     )
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: "new-internal-secret"},
@@ -98,7 +98,7 @@ async def test_register_key_accepts_the_new_internal_api_secret(
 
 
 async def test_register_key_rejects_the_legacy_secret_once_the_new_one_replaces_it(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "studylife_ai.api.internal.get_settings",
@@ -107,7 +107,7 @@ async def test_register_key_rejects_the_legacy_secret_once_the_new_one_replaces_
         ),
     )
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -117,7 +117,7 @@ async def test_register_key_rejects_the_legacy_secret_once_the_new_one_replaces_
 
 
 async def test_register_key_accepts_either_value_of_a_comma_separated_internal_api_secret(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     """Rotation (audit A5): both the old and the new value are accepted while both are listed,
     so StudyLife's backend (which always sends only the first value from its own config) can
@@ -131,7 +131,7 @@ async def test_register_key_accepts_either_value_of_a_comma_separated_internal_a
     )
 
     for secret in ("new-internal-secret", "old-internal-secret"):
-        response = await client.post(
+        response = await internal_client.post(
             "/internal/register-key",
             json={"user_id": "alice", "ai_api_key": "key-a"},
             headers={SHARED_SECRET_HEADER: secret},
@@ -140,7 +140,7 @@ async def test_register_key_accepts_either_value_of_a_comma_separated_internal_a
 
 
 async def test_register_key_still_accepts_the_legacy_secret_while_it_is_configured(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     """Rollout compatibility (audit A5): the legacy secret keeps working alongside the new one,
     not just as an either/or fallback - so StudyLife's backend and studylife-ai can deploy the
@@ -154,7 +154,7 @@ async def test_register_key_still_accepts_the_legacy_secret_while_it_is_configur
     )
 
     for secret in ("new-internal-secret", TEST_SHARED_SECRET):
-        response = await client.post(
+        response = await internal_client.post(
             "/internal/register-key",
             json={"user_id": "alice", "ai_api_key": "key-a"},
             headers={SHARED_SECRET_HEADER: secret},
@@ -163,7 +163,7 @@ async def test_register_key_still_accepts_the_legacy_secret_while_it_is_configur
 
 
 async def test_register_key_returns_503_when_neither_secret_is_configured(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "studylife_ai.api.internal.get_settings",
@@ -172,7 +172,7 @@ async def test_register_key_returns_503_when_neither_secret_is_configured(
         ),
     )
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -182,7 +182,7 @@ async def test_register_key_returns_503_when_neither_secret_is_configured(
 
 
 async def test_register_key_schedules_auto_ingestion_for_the_new_user(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     calls = []
 
@@ -191,7 +191,7 @@ async def test_register_key_schedules_auto_ingestion_for_the_new_user(
 
     monkeypatch.setattr("studylife_ai.api.internal.sync_user", fake_sync_user)
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -204,7 +204,7 @@ async def test_register_key_schedules_auto_ingestion_for_the_new_user(
 
 
 async def test_register_key_skips_auto_ingestion_when_studylife_not_configured(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     calls = []
 
@@ -219,7 +219,7 @@ async def test_register_key_skips_auto_ingestion_when_studylife_not_configured(
         ),
     )
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/register-key",
         json={"user_id": "alice", "ai_api_key": "key-a"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -244,10 +244,10 @@ async def test_sync_new_registration_logs_and_swallows_a_sync_failure(
     assert "alice" in caplog.text
 
 
-async def test_revoke_key_removes_the_key(client: AsyncClient) -> None:
+async def test_revoke_key_removes_the_key(internal_client: AsyncClient) -> None:
     await app.state.registered_key_store.set("alice", "key-a")
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/revoke-key",
         json={"user_id": "alice"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -257,10 +257,10 @@ async def test_revoke_key_removes_the_key(client: AsyncClient) -> None:
     assert await app.state.registered_key_store.get("alice") is None
 
 
-async def test_revoke_key_rejects_a_wrong_secret(client: AsyncClient) -> None:
+async def test_revoke_key_rejects_a_wrong_secret(internal_client: AsyncClient) -> None:
     await app.state.registered_key_store.set("alice", "key-a")
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/revoke-key",
         json={"user_id": "alice"},
         headers={SHARED_SECRET_HEADER: "wrong-secret"},
@@ -270,8 +270,8 @@ async def test_revoke_key_rejects_a_wrong_secret(client: AsyncClient) -> None:
     assert await app.state.registered_key_store.get("alice") == "key-a"
 
 
-async def test_revoke_key_is_a_noop_for_an_unknown_user(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_revoke_key_is_a_noop_for_an_unknown_user(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/revoke-key",
         json={"user_id": "does-not-exist"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -285,12 +285,12 @@ async def test_revoke_key_is_a_noop_for_an_unknown_user(client: AsyncClient) -> 
 
 
 async def test_revoke_key_purges_the_users_qdrant_partition(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     fake_store = AsyncMock()
     monkeypatch.setattr(app.state, "qdrant_store", fake_store)
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/revoke-key",
         json={"user_id": "alice"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -301,7 +301,7 @@ async def test_revoke_key_purges_the_users_qdrant_partition(
 
 
 async def test_revoke_key_purges_only_the_target_users_checkpoint_threads(
-    client: AsyncClient, monkeypatch: MonkeyPatch, tmp_path: Path
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
         await checkpointer.setup()
@@ -324,7 +324,7 @@ async def test_revoke_key_purges_only_the_target_users_checkpoint_threads(
         monkeypatch.setattr(app.state, "qdrant_store", AsyncMock())
         monkeypatch.setattr(app.state, "agent_checkpointer", checkpointer)
 
-        response = await client.post(
+        response = await internal_client.post(
             "/internal/revoke-key",
             json={"user_id": "alice"},
             headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -337,7 +337,7 @@ async def test_revoke_key_purges_only_the_target_users_checkpoint_threads(
 
 
 async def test_revoke_key_still_deletes_the_registration_when_qdrant_deletion_fails(
-    client: AsyncClient, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
     """Best-effort purge (F5/F13): a Qdrant hiccup must not leave the key registered - the
     registration row is deleted regardless, after the best-effort deletes are attempted."""
@@ -347,7 +347,7 @@ async def test_revoke_key_still_deletes_the_registration_when_qdrant_deletion_fa
     monkeypatch.setattr(app.state, "qdrant_store", fake_store)
 
     with caplog.at_level(logging.ERROR, logger="studylife_ai.ingestion.sync"):
-        response = await client.post(
+        response = await internal_client.post(
             "/internal/revoke-key",
             json={"user_id": "alice"},
             headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -359,7 +359,7 @@ async def test_revoke_key_still_deletes_the_registration_when_qdrant_deletion_fa
 
 
 async def test_enrich_capture_returns_the_enrichment_result(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     calls = []
 
@@ -377,7 +377,7 @@ async def test_enrich_capture_returns_the_enrichment_result(
 
     monkeypatch.setattr(internal_module, "enrich_capture", fake_enrich_capture)
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/enrich-capture",
         json={
             "user_id": "alice",
@@ -404,7 +404,7 @@ async def test_enrich_capture_returns_the_enrichment_result(
 
 
 async def test_enrich_capture_defaults_active_course_ids_to_empty_list(
-    client: AsyncClient, monkeypatch: MonkeyPatch
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
     calls = []
 
@@ -418,7 +418,7 @@ async def test_enrich_capture_defaults_active_course_ids_to_empty_list(
 
     monkeypatch.setattr(internal_module, "enrich_capture", fake_enrich_capture)
 
-    response = await client.post(
+    response = await internal_client.post(
         "/internal/enrich-capture",
         json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
         headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
@@ -428,8 +428,8 @@ async def test_enrich_capture_defaults_active_course_ids_to_empty_list(
     assert calls[0]["active_course_ids"] == []
 
 
-async def test_enrich_capture_rejects_a_wrong_secret(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_enrich_capture_rejects_a_wrong_secret(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/enrich-capture",
         json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
         headers={SHARED_SECRET_HEADER: "wrong-secret"},
@@ -438,8 +438,8 @@ async def test_enrich_capture_rejects_a_wrong_secret(client: AsyncClient) -> Non
     assert response.status_code == 401
 
 
-async def test_enrich_capture_rejects_a_missing_secret(client: AsyncClient) -> None:
-    response = await client.post(
+async def test_enrich_capture_rejects_a_missing_secret(internal_client: AsyncClient) -> None:
+    response = await internal_client.post(
         "/internal/enrich-capture",
         json={"user_id": "alice", "note_id": 42, "title": "T", "content": "C"},
     )

@@ -25,10 +25,12 @@ def build_tools(
     async def list_courses() -> list[dict[str, object]]:
         """List all courses with their id, name, code, and ECTS.
 
-        StudyLife's API does NOT validate course_id when creating a session -
-        any positive integer is silently accepted, even for a nonexistent
-        course. Always call this first to resolve a course name to its real
-        id before calling create_study_session - never guess or invent one.
+        StudyLife's API validates course_id against the user's own catalog
+        when creating a session or note - an id that doesn't exist gets
+        rejected with a 400 error, which would fail the confirmed action
+        after the user already approved it. Always call this first to
+        resolve a course name to its real id before calling
+        create_study_session or save_note - never guess or invent one.
         """
         courses = await studylife.get_courses()
         return [{"id": c.id, "name": c.name, "code": c.code, "ects": c.ects} for c in courses]

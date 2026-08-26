@@ -88,12 +88,17 @@ class StudyLifeClient:
         """Create a study session (calendar entry).
 
         `session.id` is ignored - the server always assigns a fresh one
-        (pass 0). The server validates `course_id > 0`, non-empty
-        `course_name`, `end_time > start_time`, and duration <= 24h, but does
-        **not** check `course_id` against the real course catalog - callers
-        should resolve it via `get_courses()` first. On invalid input this
-        raises `httpx.HTTPStatusError` with a *plain-text* body (not JSON),
-        e.g. via `exc.response.text`.
+        (pass 0). The server validates `course_id` against the calling
+        user's own course catalog (built-in + custom) - an unknown id gets
+        `400` with `"CourseId {id} does not exist."`, and `course_name`
+        (plus course color, for calendar display) is derived server-side
+        from the resolved course rather than trusted from this request. It
+        also validates `end_time > start_time` and duration <= 24h. Callers
+        should still resolve a real `course_id` via `get_courses()` first
+        rather than rely on this `400` alone, so a bad guess fails before a
+        session is even proposed to the user. On invalid input this raises
+        `httpx.HTTPStatusError` with a *plain-text* body (not JSON), e.g.
+        via `exc.response.text`.
         """
         response = await self._client.post(
             "/api/sessions", json=session.model_dump(by_alias=True, mode="json")
@@ -112,8 +117,10 @@ class StudyLifeClient:
         """Create a note. `id`/`created_at`/`updated_at` are server-assigned -
         unlike `create_session`, plain parameters are taken instead of a full
         `StudyLifeNote` (which requires real timestamps a new note doesn't
-        have yet). No validation on this endpoint - StudyLife accepts empty
-        title/content and any course_id/session_id without checking they exist.
+        have yet). StudyLife validates `course_id` against the user's own
+        catalog the same way `create_session` does (`400` with `"CourseId
+        {id} does not exist."` for an unknown id) - it still accepts empty
+        title/content and any `session_id` without checking it exists.
         """
         response = await self._client.post(
             "/api/notes",

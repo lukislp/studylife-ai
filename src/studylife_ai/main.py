@@ -12,14 +12,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from studylife_ai.agent.checkpoint_cleanup import run_periodic_checkpoint_cleanup
-from studylife_ai.api import agent, chat, health, internal
+from studylife_ai.api import agent, chat, health
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.scheduler import run_periodic_sync
 from studylife_ai.internal_server import (
     build_internal_server,
     create_internal_app,
-    log_deprecated_main_port_access,
     serve_internal_app,
 )
 from studylife_ai.llm.logging import configure_llm_usage_logging
@@ -82,10 +81,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         # configured at all.
         cleanup_task = asyncio.create_task(run_periodic_checkpoint_cleanup(settings, checkpointer))
 
-        # Audit O6-ai (2026-08-26, see internal_server.py): /internal/* also served on its own
-        # port, via a second uvicorn.Server task on this same event loop - sharing this app's
-        # own qdrant_store/registered_key_store/agent_checkpointer (all built above) rather than
-        # opening a second, redundant set of connections to the same backing stores.
+        # Audit O6-ai (2026-08-26, see internal_server.py): /internal/* is served exclusively on
+        # its own dedicated port, via a second uvicorn.Server task on this same event loop -
+        # sharing this app's own qdrant_store/registered_key_store/agent_checkpointer (all built
+        # above) rather than opening a second, redundant set of connections to the same backing
+        # stores.
         internal_app = create_internal_app()
         internal_app.state.qdrant_store = app.state.qdrant_store
         internal_app.state.registered_key_store = registered_key_store
@@ -122,12 +122,11 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(agent.router)
-    # Audit O6-ai (2026-08-26): still served here too, for one transition release (see
-    # internal_server.py's module docstring for the full reasoning) - `dependencies=` on
-    # include_router only applies to THIS inclusion, not to internal.router itself, so
-    # internal_server.create_internal_app()'s own inclusion of the same router (on the
-    # dedicated internal port) never logs this warning.
-    app.include_router(internal.router, dependencies=[Depends(log_deprecated_main_port_access)])
+    # Audit O6-ai phase B (2026-08-26, see docs/decisions.md): /internal/* is no longer included
+    # here at all - it moved to internal_server.py's dedicated port for good in phase A, and the
+    # transition-period fallback inclusion on this port (with its deprecation-log dependency) is
+    # dropped now that StudyLife's backend calls the dedicated port directly. A request to
+    # /internal/* on this port now 404s, same as any other undefined route.
     # HTTP request rate/latency/status per endpoint, exposed at /metrics for Prometheus to
     # scrape (see docs/decisions.md "Metrics dashboard") - on top of the hand-registered LLM
     # cost/latency/token counters in llm/metrics.py, which cover the actual model-call cost
