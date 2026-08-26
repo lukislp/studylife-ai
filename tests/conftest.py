@@ -20,6 +20,7 @@ os.environ.setdefault("AI_KEY_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 from studylife_ai.api.identity import PROXY_TOKEN_HEADER, _sign
 from studylife_ai.config import Settings
+from studylife_ai.internal_server import create_internal_app
 from studylife_ai.main import app
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
@@ -138,3 +139,26 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
         finally:
             await test_store.close()
             app.state.registered_key_store = real_store
+
+
+@pytest.fixture
+async def internal_client(client: AsyncClient) -> AsyncIterator[AsyncClient]:
+    """A second ASGI client for `internal.router`, mounted the same way
+    `internal_server.create_internal_app()` mounts it for the real dedicated port - the ONLY
+    place `/internal/*` is served now that phase B of the port cutover removed it from the main
+    app (see docs/decisions.md "F15/O6-ai phase B: /internal off the main port"). Business-logic
+    tests for register-key/revoke-key/enrich-capture use this instead of `client`.
+
+    Depends on `client` purely to run inside its already-active lifespan - `app.state.
+    qdrant_store`/`registered_key_store`/`agent_checkpointer` are all built there. Shares
+    `app.state` directly (the whole `State` object, not a per-attribute copy like
+    `internal_server.py`'s real wiring does) so a test that does `monkeypatch.setattr(app.state,
+    "qdrant_store", fake)` - the existing pattern in tests/test_internal.py, predating this
+    fixture - is visible here too, since both apps read from the exact same `State` instance.
+    """
+    internal_app = create_internal_app()
+    internal_app.state = app.state
+
+    transport = ASGITransport(app=internal_app)
+    async with AsyncClient(transport=transport, base_url="http://internal-test") as ac:
+        yield ac

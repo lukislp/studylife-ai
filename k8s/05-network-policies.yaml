@@ -31,6 +31,11 @@ spec:
 # studylife-scale has no default-deny egress (see that namespace's own k8s/12-network-
 # policies.yaml header comment), so studylife-web can already reach out cross-namespace by
 # default - this rule is the only side that needs to explicitly allow anything.
+#
+# Audit O6-ai phase B (2026-08-26, see docs/decisions.md): this rule now covers ONLY
+# chat/agent proxying (port 8000) - studylife-web's other reason for calling this app,
+# register-key/revoke-key, moved to allow-studylife-to-internal-port (port 8001) below once
+# /internal/* stopped being served on 8000 at all.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -43,30 +48,6 @@ spec:
     - from:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
           podSelector: { matchLabels: { app: studylife-web } }
-      ports:
-        - { protocol: TCP, port: 8000 }
----
-# Found live (2026-08-21): studylife-capture's capture-enrichment background task
-# (StudyLife.Server's BackgroundTaskService.CaptureEnrichment, running in the studylife-worker
-# deployment, NOT studylife-web) calls POST /internal/enrich-capture directly from the worker
-# process - every AI feature before this one (chat/agent proxying, key registration) was
-# triggered synchronously from a user's own HTTP request and therefore always ran in
-# studylife-web, so this is a genuinely new caller identity this policy never anticipated.
-# Without this rule, the connection is actively refused (default-deny-ingress above + no
-# matching allow rule), which surfaces as a silent, permanent capture-enrichment failure - the
-# call never even reaches this app's HTTP layer, so nothing shows up in its own request logs.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-studylife-worker-to-app
-  namespace: studylife-ai
-spec:
-  podSelector: { matchLabels: { app: studylife-ai } }
-  policyTypes: ["Ingress"]
-  ingress:
-    - from:
-        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
-          podSelector: { matchLabels: { app: studylife-worker } }
       ports:
         - { protocol: TCP, port: 8000 }
 ---
@@ -92,15 +73,15 @@ spec:
 ---
 # Audit O6-ai (2026-08-26, see docs/decisions.md "F15/O6-ai: chat model allowlist, metrics
 # token gate, /internal port split"): /internal/* (register-key/revoke-key/enrich-capture) is
-# ALSO served on its own port now (INTERNAL_API_PORT, default 8001 - see 01-config.yaml,
+# served EXCLUSIVELY on its own port (INTERNAL_API_PORT, default 8001 - see 01-config.yaml,
 # 04-app.yaml, internal_server.py) - this is the tighter policy that port split exists to
-# enable: unlike allow-studylife-web-to-app/allow-studylife-worker-to-app above (both scoped to
-# the whole shared port 8000, which also carries /chat, /agent, and /metrics), THIS rule admits
-# only the two pods that actually call /internal/* endpoints (register-key/revoke-key from
-# studylife-web, enrich-capture from studylife-worker - see allow-studylife-worker-to-app's own
-# comment above) to port 8001, and nothing else on this port. The two 8000 rules above are left
-# UNCHANGED (not narrowed) for one transition release, since /internal/* is still also served
-# there - see internal_server.py's module docstring.
+# enable: unlike allow-studylife-web-to-app above (scoped to the whole shared port 8000, which
+# also carries /chat and /agent), THIS rule admits only the two pods that actually call
+# /internal/* endpoints (register-key/revoke-key from studylife-web, enrich-capture from
+# studylife-worker) to port 8001, and nothing else on this port. Phase B (2026-08-26) dropped
+# studylife-worker's port-8000 access entirely (its old allow-studylife-worker-to-app rule) -
+# enrich-capture was its only reason to reach this app at all, and that call now only ever goes
+# to port 8001, covered here.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

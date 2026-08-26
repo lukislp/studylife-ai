@@ -63,12 +63,11 @@ spec:
             - containerPort: 8000
             # Audit O6-ai (2026-08-26, see docs/decisions.md "F15/O6-ai: chat model allowlist,
             # metrics token gate, /internal port split"): /internal/* (register-key/revoke-key/
-            # enrich-capture) also served here, on INTERNAL_API_PORT (studylife-ai-config) - a
+            # enrich-capture) is served ONLY here, on INTERNAL_API_PORT (studylife-ai-config) - a
             # second uvicorn.Server task in the same process (internal_server.py), not a second
             # container. Lets 05-network-policies.yaml scope ingress on THIS port to just
             # StudyLife's own backend pods, tighter than port 8000 (also reachable by
-            # Prometheus for /metrics). /internal/* is ALSO still served on 8000 for one
-            # transition release - update the placeholder port number below only if
+            # Prometheus for /metrics) - update the placeholder port number below only if
             # INTERNAL_API_PORT is ever overridden away from its default (8001) in
             # studylife-ai-config.
             - containerPort: 8001
