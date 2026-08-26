@@ -1,3 +1,11 @@
+## [1.16.4](https://github.com/lukislp/studylife-ai/compare/v1.16.3...v1.16.4) (2026-08-26)
+
+
+### Bug Fixes
+
+* chat model allowlist, metrics token gate, internal API on its own port ([d2e638b](https://github.com/lukislp/studylife-ai/commit/d2e638bd63be269ff5de902ed4d65d5430a9a907))
+* serve /internal only on the dedicated port ([ab64d90](https://github.com/lukislp/studylife-ai/commit/ab64d900551c35af0108929fad316998ee248d8b))
+
 ## [1.16.3](https://github.com/lukislp/studylife-ai/compare/v1.16.2...v1.16.3) (2026-08-26)
 
 
