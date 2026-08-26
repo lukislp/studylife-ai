@@ -1,3 +1,10 @@
+## [1.16.3](https://github.com/lukislp/studylife-ai/compare/v1.16.2...v1.16.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* split verifier secrets, MultiFernet rotation, checkpoint TTL sweep ([d3ff1e6](https://github.com/lukislp/studylife-ai/commit/d3ff1e65ed110f8982c769e787f917b356b7091d))
+
 ## [1.16.2](https://github.com/lukislp/studylife-ai/compare/v1.16.1...v1.16.2) (2026-08-26)
 
 
