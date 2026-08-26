@@ -180,6 +180,106 @@ async def test_legacy_plaintext_rows_are_transparently_readable_and_migrated_on_
     )
 
 
+# --- F5/F13: consecutive-401 counter (zombie-registration detection) ---
+
+
+async def test_record_sync_401_increments_and_returns_the_new_count(tmp_path: Path) -> None:
+    store = await _store(tmp_path)
+    await store.set("alice", "key-a")
+
+    assert await store.record_sync_401("alice") == 1
+    assert await store.record_sync_401("alice") == 2
+    assert await store.record_sync_401("alice") == 3
+
+    await store.close()
+
+
+async def test_record_sync_401_is_independent_per_user(tmp_path: Path) -> None:
+    store = await _store(tmp_path)
+    await store.set("alice", "key-a")
+    await store.set("bob", "key-b")
+
+    await store.record_sync_401("alice")
+    await store.record_sync_401("alice")
+    await store.record_sync_401("bob")
+
+    assert await store.record_sync_401("alice") == 3
+    assert await store.record_sync_401("bob") == 2
+
+    await store.close()
+
+
+async def test_record_sync_success_resets_the_counter_to_zero(tmp_path: Path) -> None:
+    store = await _store(tmp_path)
+    await store.set("alice", "key-a")
+    await store.record_sync_401("alice")
+    await store.record_sync_401("alice")
+
+    await store.record_sync_success("alice")
+
+    assert await store.record_sync_401("alice") == 1  # started counting from 0 again
+
+    await store.close()
+
+
+async def test_record_sync_401_for_an_unknown_user_is_a_noop_returning_zero(
+    tmp_path: Path,
+) -> None:
+    """The user may have been revoked between sync_all() listing user_ids and this call - must
+    not raise, must not resurrect a deleted row."""
+    store = await _store(tmp_path)
+
+    assert await store.record_sync_401("does-not-exist") == 0
+
+    await store.close()
+
+
+async def test_consecutive_401_column_is_added_to_a_pre_existing_table(tmp_path: Path) -> None:
+    """Regression test for the additive ALTER TABLE in `_ensure_consecutive_401_column`: a
+    table created before this column existed (mirrors a real pre-upgrade deployment) must gain
+    the column - defaulted to 0 - on the next setup(), without losing its existing row."""
+    db_path = tmp_path / "registered_keys.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE registered_keys ("
+            "user_id TEXT PRIMARY KEY, ai_api_key TEXT NOT NULL, registered_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO registered_keys (user_id, ai_api_key, registered_at) "
+            "VALUES ('alice', 'legacy-plaintext-key', datetime('now'))"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = RegisteredKeyStore(str(db_path), TEST_AI_KEY_ENCRYPTION_KEY)
+    await store.setup()  # must add the column without raising
+
+    assert await store.record_sync_401("alice") == 1
+    assert await store.get("alice") == "legacy-plaintext-key"
+
+    await store.close()
+
+
+async def test_setup_twice_does_not_fail_on_the_already_added_column(tmp_path: Path) -> None:
+    """Idempotency: `_ensure_consecutive_401_column`'s ALTER TABLE must not raise on a second
+    setup() against the same file (a real service restart re-runs setup() every time)."""
+    db_path = tmp_path / "registered_keys.db"
+    store1 = RegisteredKeyStore(str(db_path), TEST_AI_KEY_ENCRYPTION_KEY)
+    await store1.setup()
+    await store1.set("alice", "key-a")
+    await store1.record_sync_401("alice")
+    await store1.close()
+
+    store2 = RegisteredKeyStore(str(db_path), TEST_AI_KEY_ENCRYPTION_KEY)
+    await store2.setup()  # must not raise "duplicate column"
+
+    assert await store2.record_sync_401("alice") == 2  # counter survived the reconnect
+
+    await store2.close()
+
+
 async def test_migration_does_not_touch_an_already_encrypted_row(tmp_path: Path) -> None:
     """Idempotency: a row already encrypted by a prior setup() must not be re-encrypted (and
     thus not rewritten - Fernet tokens embed a fresh nonce/timestamp per encrypt() call, so an

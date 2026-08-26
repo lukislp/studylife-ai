@@ -17,6 +17,7 @@ studylife-mcp's oauth_store.py for the sibling project's identical pattern.
 """
 
 import logging
+import sqlite3
 
 import aiosqlite
 from cryptography.fernet import Fernet, InvalidToken
@@ -78,6 +79,26 @@ class RegisteredKeyStore:
         await conn.commit()
         self._connection = conn
         await self._migrate_plaintext_keys()
+        await self._ensure_consecutive_401_column()
+
+    async def _ensure_consecutive_401_column(self) -> None:
+        """Additive schema change (audit F5/F13, identity-contract-v1.md section 4): tracks how
+        many sync_all() runs in a row got a 401 for this user, so a key that died without a
+        revoke call (e.g. StudyLife regenerated it) can be detected and purged instead of
+        401ing forever every ingestion_sync_interval_seconds. SQLite has no
+        `ADD COLUMN IF NOT EXISTS`, so this uses the standard idiom instead: attempt the ALTER
+        TABLE and ignore the "duplicate column" error on a repeat call - safe to run
+        unconditionally on every setup()/service start, same convention as
+        `_migrate_plaintext_keys` above."""
+        try:
+            await self._conn.execute(
+                "ALTER TABLE registered_keys "
+                "ADD COLUMN consecutive_401_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
 
     async def _migrate_plaintext_keys(self) -> None:
         """One-time, in-place migration for A4: older rows stored ai_api_key as plaintext.
@@ -135,6 +156,31 @@ class RegisteredKeyStore:
     async def delete(self, user_id: str) -> None:
         await self._conn.execute("DELETE FROM registered_keys WHERE user_id = ?", (user_id,))
         await self._conn.commit()
+
+    async def record_sync_success(self, user_id: str) -> None:
+        """Resets the consecutive-401 counter (see `_ensure_consecutive_401_column`) - a
+        successful sync means the registered key is still good."""
+        await self._conn.execute(
+            "UPDATE registered_keys SET consecutive_401_count = 0 WHERE user_id = ?", (user_id,)
+        )
+        await self._conn.commit()
+
+    async def record_sync_401(self, user_id: str) -> int:
+        """Increments the consecutive-401 counter and returns its new value - used by
+        `ingestion.sync.sync_all()` to detect a zombie registration (see
+        `_ensure_consecutive_401_column`). No-op returning 0 if the user was revoked in the
+        meantime (row no longer exists)."""
+        await self._conn.execute(
+            "UPDATE registered_keys SET consecutive_401_count = consecutive_401_count + 1 "
+            "WHERE user_id = ?",
+            (user_id,),
+        )
+        await self._conn.commit()
+        async with self._conn.execute(
+            "SELECT consecutive_401_count FROM registered_keys WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else 0
 
     async def list_user_ids(self) -> list[str]:
         async with self._conn.execute("SELECT user_id FROM registered_keys") as cursor:

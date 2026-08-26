@@ -374,5 +374,19 @@ class QdrantStore:
             ),
         )
 
+    async def delete_user(self, *, user_id: str) -> None:
+        """Delete every point belonging to one user, across all content types - the Qdrant half
+        of a full account purge (see ingestion/sync.py's `purge_user()`, audit findings F5/F13).
+        Unlike `delete_entity()`, this filters on `user_id` alone: there is no content_type/
+        entity_id left to narrow by, since the whole partition is going away."""
+        if not await self.collection_exists():
+            return
+        await self._client.delete(
+            collection_name=self._collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(must=[_user_id_condition(user_id)])
+            ),
+        )
+
     async def close(self) -> None:
         await self._client.close()

@@ -1,6 +1,9 @@
 import logging
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pytest import LogCaptureFixture, MonkeyPatch
 
 from studylife_ai.api import internal as internal_module
@@ -168,6 +171,84 @@ async def test_revoke_key_is_a_noop_for_an_unknown_user(client: AsyncClient) -> 
     )
 
     assert response.status_code == 200
+
+
+# --- F5/F13: revoke-key now does a full purge (registration + Qdrant partition + checkpoint
+# threads), via the same ingestion.sync.purge_user() the sync loop's zombie cleanup uses. ---
+
+
+async def test_revoke_key_purges_the_users_qdrant_partition(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    fake_store = AsyncMock()
+    monkeypatch.setattr(app.state, "qdrant_store", fake_store)
+
+    response = await client.post(
+        "/internal/revoke-key",
+        json={"user_id": "alice"},
+        headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+    )
+
+    assert response.status_code == 200
+    fake_store.delete_user.assert_awaited_once_with(user_id="alice")
+
+
+async def test_revoke_key_purges_only_the_target_users_checkpoint_threads(
+    client: AsyncClient, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
+        await checkpointer.setup()
+        # Mirrors the real f"{user_id}:{uuid4()}" thread_id shape (see api/agent.py) - the exact
+        # suffix doesn't matter, only that it's prefixed by the owning user_id.
+        await checkpointer.conn.execute(
+            "INSERT INTO checkpoints "
+            "(thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, "
+            "metadata) VALUES (?, '', 'chk-1', NULL, 'json', ?, ?)",
+            ("alice:thread-1", b"{}", b"{}"),
+        )
+        await checkpointer.conn.execute(
+            "INSERT INTO checkpoints "
+            "(thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, "
+            "metadata) VALUES (?, '', 'chk-1', NULL, 'json', ?, ?)",
+            ("bob:thread-1", b"{}", b"{}"),
+        )
+        await checkpointer.conn.commit()
+
+        monkeypatch.setattr(app.state, "qdrant_store", AsyncMock())
+        monkeypatch.setattr(app.state, "agent_checkpointer", checkpointer)
+
+        response = await client.post(
+            "/internal/revoke-key",
+            json={"user_id": "alice"},
+            headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+        )
+
+        assert response.status_code == 200
+        async with checkpointer.conn.execute("SELECT thread_id FROM checkpoints") as cursor:
+            remaining = {row[0] for row in await cursor.fetchall()}
+        assert remaining == {"bob:thread-1"}
+
+
+async def test_revoke_key_still_deletes_the_registration_when_qdrant_deletion_fails(
+    client: AsyncClient, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
+    """Best-effort purge (F5/F13): a Qdrant hiccup must not leave the key registered - the
+    registration row is deleted regardless, after the best-effort deletes are attempted."""
+    await app.state.registered_key_store.set("alice", "key-a")
+    fake_store = AsyncMock()
+    fake_store.delete_user.side_effect = RuntimeError("qdrant unreachable")
+    monkeypatch.setattr(app.state, "qdrant_store", fake_store)
+
+    with caplog.at_level(logging.ERROR, logger="studylife_ai.ingestion.sync"):
+        response = await client.post(
+            "/internal/revoke-key",
+            json={"user_id": "alice"},
+            headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+        )
+
+    assert response.status_code == 200
+    assert await app.state.registered_key_store.get("alice") is None
+    assert any("Qdrant" in record.message for record in caplog.records)
 
 
 async def test_enrich_capture_returns_the_enrichment_result(

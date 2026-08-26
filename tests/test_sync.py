@@ -1,7 +1,10 @@
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pytest import MonkeyPatch
 
 from studylife_ai.config import Settings
@@ -9,6 +12,46 @@ from studylife_ai.ingestion import sync as sync_module
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 from tests.conftest import TEST_AI_KEY_ENCRYPTION_KEY
+
+
+async def _seed_registered_users_on_disk(db_path: str, users: dict[str, str]) -> None:
+    """Like `_install_registered_users`, but writes to a real file instead of monkeypatching
+    `sync_module.RegisteredKeyStore` to always hand back the same open instance. Needed by any
+    test that calls `sync_all()` more than once: `sync_all()` closes its RegisteredKeyStore in a
+    `finally` at the end of every call (matching one real production tick), which would close
+    the shared in-memory instance `_install_registered_users` installs out from under a second
+    call. A real file lets each `sync_all()` call open (and close) its own fresh connection
+    against the same on-disk data, exactly like production."""
+    store = RegisteredKeyStore(db_path, TEST_AI_KEY_ENCRYPTION_KEY)
+    await store.setup()
+    for user_id, ai_api_key in users.items():
+        await store.set(user_id, ai_api_key)
+    await store.close()
+
+
+def _http_401_error() -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://studylife.test/api/notes")
+    response = httpx.Response(401, request=request)
+    return httpx.HTTPStatusError("401 Unauthorized", request=request, response=response)
+
+
+async def _insert_checkpoint_row(checkpointer: AsyncSqliteSaver, thread_id: str) -> None:
+    """purge_user()/`_delete_checkpoint_threads` only need a row whose thread_id it can match
+    and delete via SQL LIKE + adelete_thread() - not a structurally valid LangGraph checkpoint
+    payload, so this inserts the bare minimum matching the schema in `AsyncSqliteSaver.setup()`.
+    """
+    await checkpointer.conn.execute(
+        "INSERT INTO checkpoints "
+        "(thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, "
+        "metadata) VALUES (?, '', 'chk-1', NULL, 'json', ?, ?)",
+        (thread_id, b"{}", b"{}"),
+    )
+    await checkpointer.conn.commit()
+
+
+async def _checkpoint_thread_ids(checkpointer: AsyncSqliteSaver) -> set[str]:
+    async with checkpointer.conn.execute("SELECT thread_id FROM checkpoints") as cursor:
+        return {row[0] for row in await cursor.fetchall()}
 
 
 def _settings(**overrides: object) -> Settings:
@@ -405,3 +448,177 @@ async def test_sync_all_continues_with_other_users_after_one_fails(
     assert synced_users == ["key-b"]
     assert any("failed for user_id=alice" in record.message for record in caplog.records)
     fake_store.close.assert_awaited_once()
+
+
+# --- F5/F13: purge_user() - the shared full-account purge used by both /internal/revoke-key
+# and this module's own zombie-registration cleanup below. ---
+
+
+async def test_purge_user_deletes_qdrant_partition_checkpoint_threads_and_the_key_row(
+    tmp_path: Path,
+) -> None:
+    store = AsyncMock()
+    key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
+    await key_store.setup()
+    await key_store.set("alice", "key-a")
+
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
+        await checkpointer.setup()
+        await _insert_checkpoint_row(checkpointer, "alice:thread-1")
+        await _insert_checkpoint_row(checkpointer, "alice:thread-2")
+        await _insert_checkpoint_row(checkpointer, "bob:thread-1")  # must survive
+
+        await sync_module.purge_user(
+            user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+        )
+
+        store.delete_user.assert_awaited_once_with(user_id="alice")
+        assert await _checkpoint_thread_ids(checkpointer) == {"bob:thread-1"}
+
+    assert await key_store.get("alice") is None
+    await key_store.close()
+
+
+async def test_purge_user_deletes_the_key_row_even_when_qdrant_deletion_fails(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Best-effort (F5/F13): a Qdrant hiccup must not leave the key registered."""
+    store = AsyncMock()
+    store.delete_user.side_effect = RuntimeError("qdrant unreachable")
+    key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
+    await key_store.setup()
+    await key_store.set("alice", "key-a")
+
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
+        await checkpointer.setup()
+        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
+            await sync_module.purge_user(
+                user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+            )
+
+    assert await key_store.get("alice") is None
+    assert any("Qdrant" in record.message for record in caplog.records)
+    await key_store.close()
+
+
+async def test_purge_user_deletes_the_key_row_even_when_checkpoint_deletion_fails(
+    tmp_path: Path, monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Best-effort (F5/F13): a checkpoint-store hiccup must not leave the key registered
+    either - Qdrant and checkpoints are independent best-effort steps, neither blocks the
+    other or the final registration delete."""
+    store = AsyncMock()
+    key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
+    await key_store.setup()
+    await key_store.set("alice", "key-a")
+
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
+        await checkpointer.setup()
+        await _insert_checkpoint_row(checkpointer, "alice:thread-1")
+        monkeypatch.setattr(
+            checkpointer, "adelete_thread", AsyncMock(side_effect=RuntimeError("locked"))
+        )
+
+        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
+            await sync_module.purge_user(
+                user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+            )
+
+    assert await key_store.get("alice") is None
+    assert any("checkpoint" in record.message.lower() for record in caplog.records)
+    await key_store.close()
+
+
+# --- F5/F13: sync_all()'s consecutive-401 zombie-registration cleanup ---
+
+
+async def test_sync_all_counts_a_401_without_purging_below_the_threshold(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def fake_client_factory(**_kwargs: object) -> None:
+        raise _http_401_error()
+
+    fake_store = FakeQdrantStore(known={})
+    purge_calls: list[str] = []
+
+    async def fake_purge_user(*, user_id: str, **_kwargs: object) -> None:
+        purge_calls.append(user_id)
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "purge_user", fake_purge_user)
+    await _install_registered_users(monkeypatch, {"alice": "key-a"})
+
+    with caplog.at_level("INFO", logger="studylife_ai.ingestion.sync"):
+        await sync_module.sync_all(_settings())
+
+    assert "consecutive=1/20" in caplog.text
+    assert purge_calls == []
+
+
+async def test_sync_all_resets_the_401_counter_after_a_successful_sync(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    fail = True
+
+    def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
+        if fail:
+            raise _http_401_error()
+        return FakeStudyLifeClient()
+
+    fake_store = FakeQdrantStore(known={})
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    db_path = str(tmp_path / "registered_keys.db")
+    await _seed_registered_users_on_disk(db_path, {"alice": "key-a"})
+    settings = _settings(
+        registered_keys_db_path=db_path, ai_key_encryption_key=TEST_AI_KEY_ENCRYPTION_KEY
+    )
+
+    with caplog.at_level("INFO", logger="studylife_ai.ingestion.sync"):
+        await sync_module.sync_all(settings)  # 401 -> consecutive=1
+        fail = False
+        await sync_module.sync_all(settings)  # success -> resets to 0
+        fail = True
+        await sync_module.sync_all(settings)  # 401 again -> should be back to consecutive=1
+
+    assert "consecutive=1/20" in caplog.text
+    assert "consecutive=2/20" not in caplog.text
+
+
+async def test_sync_all_purges_exactly_once_after_reaching_the_401_threshold(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    def fake_client_factory(**_kwargs: object) -> None:
+        raise _http_401_error()
+
+    fake_store = FakeQdrantStore(known={})
+    purge_calls: list[str] = []
+
+    async def fake_purge_user(*, user_id: str, **_kwargs: object) -> None:
+        purge_calls.append(user_id)
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "purge_user", fake_purge_user)
+    db_path = str(tmp_path / "registered_keys.db")
+    await _seed_registered_users_on_disk(db_path, {"alice": "key-a"})
+    settings = _settings(
+        registered_keys_db_path=db_path,
+        ai_key_encryption_key=TEST_AI_KEY_ENCRYPTION_KEY,
+        agent_checkpoint_db_path=str(tmp_path / "agent_checkpoints.db"),
+    )
+
+    with caplog.at_level("WARNING", logger="studylife_ai.ingestion.sync"):
+        for _ in range(sync_module.ZOMBIE_401_THRESHOLD):
+            await sync_module.sync_all(settings)
+
+    assert purge_calls == ["alice"]
+    assert any("purging as a zombie registration" in record.message for record in caplog.records)
