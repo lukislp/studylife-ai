@@ -19,7 +19,12 @@ class ChatRequest(BaseModel):
 
     `messages` is the full conversation history, oldest first. `model`
     optionally overrides the server-configured default LiteLLM model
-    identifier for this request.
+    identifier for this request - kept for forward compat (e.g. a future
+    per-user model picker), even though no deployed caller sets it today.
+    Audit F15: the server pays for whatever model gets named here, so a
+    request naming anything outside `Settings.allowed_chat_models` (plus the
+    always-implicitly-allowed `Settings.llm_model` itself) gets a 400 before
+    any LLM call is made - see `api/chat.py`'s `_resolve_model`.
     """
 
     messages: list[ChatMessage] = Field(min_length=1)

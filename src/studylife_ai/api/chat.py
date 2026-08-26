@@ -21,7 +21,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
@@ -39,6 +39,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 
+def _allowed_models(settings: Settings) -> set[str]:
+    """The set of LiteLLM model strings a `ChatRequest.model` override may name (audit F15) -
+    `settings.llm_model` is always implicitly a member, in addition to whatever
+    `settings.allowed_chat_models` (comma-separated) adds. With the default empty
+    `allowed_chat_models`, this is exactly `{llm_model}` - the tightest useful default."""
+    allowed = {settings.llm_model}
+    allowed.update(
+        model.strip() for model in settings.allowed_chat_models.split(",") if model.strip()
+    )
+    return allowed
+
+
+def _resolve_model(requested: str | None, settings: Settings) -> str:
+    """Returns the LiteLLM model string this request should use, or raises a 400 before any LLM
+    call is made if `requested` isn't in `_allowed_models` (audit F15: the server, not the
+    caller, pays for whatever model gets named here). `requested=None` (no override in the
+    request body - true of every deployed caller today) always resolves to `settings.llm_model`
+    without consulting the allowlist at all."""
+    if requested is None:
+        return settings.llm_model
+    allowed = _allowed_models(settings)
+    if requested not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"model '{requested}' is not allowed. Configure ALLOWED_CHAT_MODELS to permit "
+                "it, or omit `model` to use the server default."
+            ),
+        )
+    return requested
+
+
 def _latest_user_message(messages: list[ChatMessage]) -> str:
     for message in reversed(messages):
         if message.role == "user":
@@ -53,10 +85,9 @@ async def _retrieve_context(
 
 
 async def _sse_event_stream(
-    request: ChatRequest, store: QdrantStore, user_id: str
+    request: ChatRequest, store: QdrantStore, user_id: str, model: str
 ) -> AsyncIterator[str]:
     settings = get_settings()
-    model = request.model or settings.llm_model
 
     try:
         chunks = await _retrieve_context(
@@ -122,7 +153,14 @@ async def chat(
     http_request: Request,
     identity: ResolvedIdentity = Depends(resolve_identity),
 ) -> StreamingResponse:
+    # Resolved (and, if `request.model` is set, allowlist-checked - audit F15) before the
+    # StreamingResponse is ever constructed: once streaming starts, the response is already
+    # committed as a 200 (see the LLM-failure path below, which can only ever emit an SSE
+    # `error` event, not a real HTTP error status) - a disallowed model must fail as a clean 400
+    # instead.
+    model = _resolve_model(request.model, get_settings())
     store: QdrantStore = http_request.app.state.qdrant_store
     return StreamingResponse(
-        _sse_event_stream(request, store, identity.user_id), media_type="text/event-stream"
+        _sse_event_stream(request, store, identity.user_id, model),
+        media_type="text/event-stream",
     )
