@@ -25,6 +25,22 @@ class Settings(BaseSettings):
     # Defaults to a local Ollama model so the service runs without an API key
     # out of the box via `docker compose up`.
     llm_model: str = "ollama/llama3.2"
+
+    # Audit F15 (2026-08-26): ChatRequest.model (schemas/chat.py) lets a caller override
+    # llm_model per-request - the server, not the caller, pays for whatever model gets named,
+    # so an unrestricted override is a real cost-control gap even though nothing deployed
+    # currently sends it (the Blazor chat client never sets it, and /agent never accepted the
+    # equivalent - see schemas/agent.py). Comma-separated list of ADDITIONALLY allowed LiteLLM
+    # model strings; llm_model itself is always implicitly allowed regardless of this setting,
+    # so the default here (empty) means exactly "only the configured default model" - the
+    # tightest useful default, and a no-op for every existing caller (none of which ever set
+    # `model` in the first place). A request naming anything outside this set gets a 400 before
+    # any LLM call is made. Kept as its own setting (not folded into llm_model) so the knob
+    # itself - and ChatRequest.model - can stay for legitimate forward compat (e.g. a future
+    # per-user model picker in the Blazor UI) without reopening the unrestricted version of this
+    # gap. See docs/decisions.md "F15/O6-ai: chat model allowlist, metrics token gate, /internal
+    # port split".
+    allowed_chat_models: str = ""
     llm_api_base: str | None = "http://localhost:11434"
     llm_request_timeout_seconds: float = 60.0
     # For reasoning models only (e.g. OpenAI's gpt-5 family) - "minimal"/"low"/"medium"/"high".
@@ -242,6 +258,34 @@ class Settings(BaseSettings):
     # a public API, so an in-memory counter (no Redis/shared state) is enough.
     rate_limit_requests: int = 20
     rate_limit_window_seconds: int = 60
+
+    # Audit O6-ai (2026-08-26, see docs/decisions.md): GET /metrics (main.py, via
+    # prometheus-fastapi-instrumentator) is unauthenticated, and its labels include per-user_id
+    # LLM cost/token/latency data (llm/metrics.py) - anyone who can reach the port can read
+    # every user's spend. Optional static bearer: unset (the default) is a genuine no-op, the
+    # endpoint stays exactly as unauthenticated as it is today, since the operator's Prometheus
+    # may not be reconfigured yet. When set, GET /metrics requires an `Authorization: Bearer
+    # <token>` header matching this value (constant-time compare, same convention as
+    # studylife_internal_api_secret) or responds 401 - the operator must then add
+    # `authorization: {credentials: <token>}` to Prometheus's own scrape config for the
+    # "studylife-ai" job (see README.md "Observability"). Chosen over dropping the user_id
+    # label: per-user cost attribution is the whole point of that label (see llm/metrics.py) and
+    # cardinality is already bounded (a handful of real users, not a public multi-tenant
+    # service) - gating the endpoint closes the actual leak (unauthenticated network access)
+    # without losing that data.
+    metrics_token: str | None = None
+
+    # Audit O6-ai (2026-08-26, see docs/decisions.md): /internal/* (api/internal.py) shares the
+    # public port with /chat, /agent, and /metrics - a k8s NetworkPolicy scoped to that port
+    # necessarily also has to admit every other caller of anything else on it (see
+    # k8s/05-network-policies.yaml's allow-prometheus-to-app, which only needs /metrics but
+    # currently gets network-level access to /internal/* too). Port `internal_server.py`'s
+    # second FastAPI app (only /internal/*) listens on, via a second uvicorn.Server task in
+    # main.py's lifespan - not a second process/container. /internal/* is ALSO still served on
+    # the main port for one transition release (main.py logs a deprecation warning each time
+    # that path is actually hit) so StudyLife's backend keeps working unchanged regardless of
+    # which port it's configured to call, or which side of the split deploys first.
+    internal_api_port: int = 8001
 
     # Capture enrichment (studylife-capture browser extension, see docs/decisions.md "Capture
     # enrichment"): cosine-similarity threshold (rag/enrichment.py's course vector search,

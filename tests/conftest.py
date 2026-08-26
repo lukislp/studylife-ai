@@ -98,6 +98,18 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
 
     monkeypatch.setattr("studylife_ai.main.run_periodic_sync", _noop_run_periodic_sync)
 
+    # Default: the second uvicorn.Server task that serves /internal/* on its own port (audit
+    # O6-ai, see internal_server.py) is a no-op in tests, same reasoning as
+    # _noop_run_periodic_sync above - main.py's lifespan still builds a real internal_app and a
+    # real uvicorn.Server (build_internal_server itself never binds a socket), it just never
+    # starts it, so ordinary tests never bind a real port. Dedicated tests for that server itself
+    # (tests/test_internal_server.py) call build_internal_server/serve_internal_app directly,
+    # bypassing this fixture and its lifespan entirely.
+    async def _noop_serve_internal_app(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("studylife_ai.main.serve_internal_app", _noop_serve_internal_app)
+
     # Runs the app's lifespan (startup/shutdown) — ASGITransport alone doesn't,
     # and /chat needs app.state.qdrant_store, which lifespan sets up.
     async with app.router.lifespan_context(app):

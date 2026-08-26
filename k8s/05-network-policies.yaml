@@ -90,6 +90,34 @@ spec:
       ports:
         - { protocol: TCP, port: 8000 }
 ---
+# Audit O6-ai (2026-08-26, see docs/decisions.md "F15/O6-ai: chat model allowlist, metrics
+# token gate, /internal port split"): /internal/* (register-key/revoke-key/enrich-capture) is
+# ALSO served on its own port now (INTERNAL_API_PORT, default 8001 - see 01-config.yaml,
+# 04-app.yaml, internal_server.py) - this is the tighter policy that port split exists to
+# enable: unlike allow-studylife-web-to-app/allow-studylife-worker-to-app above (both scoped to
+# the whole shared port 8000, which also carries /chat, /agent, and /metrics), THIS rule admits
+# only the two pods that actually call /internal/* endpoints (register-key/revoke-key from
+# studylife-web, enrich-capture from studylife-worker - see allow-studylife-worker-to-app's own
+# comment above) to port 8001, and nothing else on this port. The two 8000 rules above are left
+# UNCHANGED (not narrowed) for one transition release, since /internal/* is still also served
+# there - see internal_server.py's module docstring.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-studylife-to-internal-port
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: studylife-ai } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: studylife-web } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: studylife-worker } }
+      ports:
+        - { protocol: TCP, port: 8001 }
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -236,6 +236,139 @@ async def test_chat_returns_401_for_an_expired_token(client: AsyncClient) -> Non
     assert response.status_code == 401
 
 
+# --- Audit F15: ChatRequest.model allowlist (Settings.allowed_chat_models). ---
+
+
+async def test_chat_omitting_model_uses_the_server_default_without_consulting_the_allowlist(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """No deployed caller ever sets `model` (see schemas/chat.py) - this is the only path that
+    actually matters in production, and it must stay completely unaffected by the allowlist."""
+    calls = []
+
+    async def fake_acompletion(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return _make_fake_stream(["Hello"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+
+    response = await client.post("/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
+
+    assert response.status_code == 200
+    assert calls[0]["model"] == "ollama/llama3.2"
+
+
+async def test_chat_rejects_a_model_override_when_no_allowlist_is_configured(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Default (ALLOWED_CHAT_MODELS unset): only the configured default model is allowed - the
+    tightest useful default (audit F15)."""
+
+    async def fake_acompletion(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("must not reach the LLM for a disallowed model")
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+
+    response = await client.post(
+        "/chat",
+        json={
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "openai/gpt-4o",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "not allowed" in response.json()["detail"]
+
+
+async def test_chat_accepts_a_model_override_explicitly_naming_the_server_default(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """The configured default model is always implicitly allowed, even with no
+    ALLOWED_CHAT_MODELS entries naming it explicitly."""
+    calls = []
+
+    async def fake_acompletion(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return _make_fake_stream(["Hello"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+
+    response = await client.post(
+        "/chat",
+        json={
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "ollama/llama3.2",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["model"] == "ollama/llama3.2"
+
+
+async def test_chat_accepts_a_model_listed_in_allowed_chat_models(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    from studylife_ai import config as config_module
+
+    calls = []
+
+    async def fake_acompletion(*_args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return _make_fake_stream(["Hello"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+    settings = config_module.get_settings()
+    monkeypatch.setattr(
+        "studylife_ai.api.chat.get_settings",
+        lambda: settings.model_copy(
+            update={"allowed_chat_models": "openai/gpt-4o-mini, openai/gpt-4o"}
+        ),
+    )
+
+    response = await client.post(
+        "/chat",
+        json={
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "openai/gpt-4o-mini",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["model"] == "openai/gpt-4o-mini"
+
+
+async def test_chat_rejects_a_model_not_in_a_configured_allowed_chat_models_list(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    from studylife_ai import config as config_module
+
+    async def fake_acompletion(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("must not reach the LLM for a disallowed model")
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+    _mock_no_retrieval(monkeypatch)
+    settings = config_module.get_settings()
+    monkeypatch.setattr(
+        "studylife_ai.api.chat.get_settings",
+        lambda: settings.model_copy(update={"allowed_chat_models": "openai/gpt-4o-mini"}),
+    )
+
+    response = await client.post(
+        "/chat",
+        json={
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "openai/gpt-5",
+        },
+    )
+
+    assert response.status_code == 400
+
+
 async def test_chat_falls_back_to_no_context_when_retrieval_fails(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:

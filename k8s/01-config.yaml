@@ -67,3 +67,10 @@ data:
 
   REGISTERED_KEYS_DB_PATH: "/app/data/registered_keys.db"
   AGENT_CHECKPOINT_DB_PATH: "/app/data/agent_checkpoints.db"
+
+  # Audit O6-ai (2026-08-26, see docs/decisions.md): /internal/* port, matching the Deployment's
+  # containerPort and the Service's "internal" port (04-app.yaml) and
+  # 05-network-policies.yaml's allow-studylife-to-internal-port. Left at its Settings default
+  # (8001) rather than overridden here - only listed for discoverability alongside the manifests
+  # that reference it by number.
+  # INTERNAL_API_PORT: "8001"
