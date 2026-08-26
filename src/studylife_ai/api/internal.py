@@ -17,7 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
-from studylife_ai.ingestion.sync import sync_user
+from studylife_ai.ingestion.sync import purge_user, sync_user
 from studylife_ai.rag.enrichment import enrich_capture
 from studylife_ai.schemas.internal import (
     EnrichCaptureRequest,
@@ -81,8 +81,18 @@ async def register_key(
 
 @router.post("/internal/revoke-key")
 async def revoke_key(request: RevokeKeyRequest, http_request: Request) -> dict[str, bool]:
+    """Full purge, not just the registration row (audit F5/F13): a revoke that only deleted
+    `registered_keys` left the user's Qdrant partition and agent-checkpoint threads retrievable
+    via /chat and /agent forever. See `ingestion.sync.purge_user` for the deletion order and
+    why - shared with the sync loop's own zombie-registration cleanup so there is one purge
+    implementation, not two."""
     _require_valid_secret(http_request)
-    await http_request.app.state.registered_key_store.delete(request.user_id)
+    await purge_user(
+        user_id=request.user_id,
+        store=http_request.app.state.qdrant_store,
+        checkpointer=http_request.app.state.agent_checkpointer,
+        key_store=http_request.app.state.registered_key_store,
+    )
     logger.info("Revoked AiApiKey for user_id=%s", request.user_id)
     return {"ok": True}
 

@@ -18,6 +18,9 @@ import hashlib
 import logging
 from collections.abc import Callable, Sequence
 
+import httpx
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.chunking import chunk_text
 from studylife_ai.ingestion.qdrant_store import ContentType, EntityChunkMetadata, QdrantStore
@@ -34,6 +37,13 @@ from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNot
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
+
+# Consecutive 401s from sync_all() before a registration is treated as a zombie (audit F5/F13):
+# the AiApiKey was regenerated in StudyLife without a matching /internal/revoke-key call, so
+# this account 401s on every ingestion_sync_interval_seconds tick forever unless purged. 20
+# ticks (~20 minutes at the default 60s interval) tolerates a transient outage on StudyLife's
+# side without purging a still-valid registration over a blip.
+ZOMBIE_401_THRESHOLD = 20
 
 
 def fingerprint_note(note: StudyLifeNote) -> str:
@@ -248,6 +258,54 @@ async def sync_user(
     )
 
 
+async def _delete_checkpoint_threads(checkpointer: AsyncSqliteSaver, user_id: str) -> None:
+    """Deletes every agent-checkpoint thread owned by `user_id`. Thread ids are always
+    `f"{user_id}:{uuid4()}"` (see api/agent.py's `run_agent`), but `BaseCheckpointSaver` has no
+    "list threads by prefix" API - so this queries `AsyncSqliteSaver`'s own underlying sqlite
+    connection directly (its documented public `conn` attribute) for matching thread_ids, then
+    deletes each one through the normal public `adelete_thread()`."""
+    async with checkpointer.conn.execute(
+        "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ?", (f"{user_id}:%",)
+    ) as cursor:
+        rows = await cursor.fetchall()
+    for (thread_id,) in rows:
+        await checkpointer.adelete_thread(thread_id)
+
+
+async def purge_user(
+    *,
+    user_id: str,
+    store: QdrantStore,
+    checkpointer: AsyncSqliteSaver,
+    key_store: RegisteredKeyStore,
+) -> None:
+    """Fully removes one user's data - "one operation = user fully gone" (audit F5/F13,
+    identity-contract-v1.md section 4). Shared by both `/internal/revoke-key` (api/internal.py,
+    immediate) and this module's own zombie cleanup below (after `ZOMBIE_401_THRESHOLD`
+    consecutive 401s).
+
+    Order: the Qdrant partition and checkpoint threads are deleted first, best-effort - a
+    failure there is logged, never raised, so one hiccup can't block the rest of the purge. The
+    `registered_keys` row is deleted LAST, only after both attempts have run: if the process
+    died partway through, the registration would still be there afterwards, so the next revoke
+    (or the next zombie-threshold trip) simply retries the whole purge - the alternative order
+    (deleting the key row first) would instead risk silently orphaning Qdrant data or checkpoint
+    threads with no registration left to ever trigger their cleanup again.
+    """
+    try:
+        await store.delete_user(user_id=user_id)
+    except Exception:
+        logger.exception("Purge: failed to delete Qdrant partition for user_id=%s", user_id)
+    try:
+        await _delete_checkpoint_threads(checkpointer, user_id)
+    except Exception:
+        logger.exception("Purge: failed to delete checkpoint threads for user_id=%s", user_id)
+    await key_store.delete(user_id)
+    logger.info(
+        "Purge: user_id=%s fully removed (registration, Qdrant partition, checkpoints)", user_id
+    )
+
+
 async def sync_all(settings: Settings) -> None:
     """Syncs every registered StudyLife account (see docs/decisions.md
     "M4.5 Multi-user support") into its own Qdrant partition, one after
@@ -286,8 +344,46 @@ async def sync_all(settings: Settings) -> None:
                 await sync_user(
                     user_id=user_id, ai_api_key=ai_api_key, settings=settings, store=store
                 )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 401:
+                    await _handle_sync_401(
+                        user_id=user_id,
+                        settings=settings,
+                        store=store,
+                        registered_keys=registered_keys,
+                    )
+                else:
+                    logger.exception("Sync: failed for user_id=%s, skipping", user_id)
             except Exception:
                 logger.exception("Sync: failed for user_id=%s, skipping", user_id)
+            else:
+                await registered_keys.record_sync_success(user_id)
     finally:
         await store.close()
         await registered_keys.close()
+
+
+async def _handle_sync_401(
+    *, user_id: str, settings: Settings, store: QdrantStore, registered_keys: RegisteredKeyStore
+) -> None:
+    """Tracks a sync's 401 towards ZOMBIE_401_THRESHOLD and purges the account once it's
+    reached (see `purge_user` above and identity-contract-v1.md section 4) - a key that died
+    without a matching /internal/revoke-key call (StudyLife regenerated it) would otherwise
+    401 here forever, every ingestion_sync_interval_seconds."""
+    count = await registered_keys.record_sync_401(user_id)
+    if count < ZOMBIE_401_THRESHOLD:
+        logger.info(
+            "Sync: user_id=%s got a 401 (consecutive=%d/%d)", user_id, count, ZOMBIE_401_THRESHOLD
+        )
+        return
+    logger.warning(
+        "Sync: user_id=%s hit %d consecutive 401s - purging as a zombie registration "
+        "(registered key was likely regenerated without a revoke call)",
+        user_id,
+        count,
+    )
+    async with AsyncSqliteSaver.from_conn_string(settings.agent_checkpoint_db_path) as checkpointer:
+        await checkpointer.setup()
+        await purge_user(
+            user_id=user_id, store=store, checkpointer=checkpointer, key_store=registered_keys
+        )
