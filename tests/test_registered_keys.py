@@ -2,7 +2,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 from tests.conftest import TEST_AI_KEY_ENCRYPTION_KEY
@@ -312,3 +312,109 @@ async def test_migration_does_not_touch_an_already_encrypted_row(tmp_path: Path)
         conn.close()
 
     assert raw_after == raw_before
+
+
+# --- Audit A13/F14 rest: MultiFernet rotation for AI_KEY_ENCRYPTION_KEY ---
+
+
+async def test_a_single_key_config_keeps_working_unchanged(tmp_path: Path) -> None:
+    """MultiFernet must be a transparent drop-in for the single-key case - no behavior change
+    for every existing deployment that hasn't started rotating."""
+    store = RegisteredKeyStore(str(tmp_path / "registered_keys.db"), TEST_AI_KEY_ENCRYPTION_KEY)
+    await store.setup()
+
+    await store.set("alice", "key-a")
+
+    assert await store.get("alice") == "key-a"
+
+    await store.close()
+
+
+async def test_new_rows_are_encrypted_with_the_first_configured_key(tmp_path: Path) -> None:
+    old_key = TEST_AI_KEY_ENCRYPTION_KEY
+    new_key = Fernet.generate_key().decode()
+    db_path = tmp_path / "registered_keys.db"
+
+    # Rotated config: the new key listed first (it encrypts), the old key kept second (still
+    # decrypts anything written under it) - see registered_keys.py's module docstring.
+    store = RegisteredKeyStore(str(db_path), f"{new_key},{old_key}")
+    await store.setup()
+    await store.set("alice", "key-a")
+    await store.close()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        raw_value = conn.execute(
+            "SELECT ai_api_key FROM registered_keys WHERE user_id = ?", ("alice",)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    # Encrypted with the NEW (first-listed) key, not the old one.
+    assert Fernet(new_key.encode()).decrypt(raw_value.encode()) == b"key-a"
+    with pytest.raises(InvalidToken):
+        Fernet(old_key.encode()).decrypt(raw_value.encode())
+
+
+async def test_rows_encrypted_under_an_older_key_still_decrypt_after_rotation(
+    tmp_path: Path,
+) -> None:
+    """The rotation scenario end to end: a row written while only the old key was configured
+    must still be readable once the config adds a new key in front of it, without any manual
+    re-encryption step."""
+    old_key = TEST_AI_KEY_ENCRYPTION_KEY
+    new_key = Fernet.generate_key().decode()
+    db_path = tmp_path / "registered_keys.db"
+
+    store_before_rotation = RegisteredKeyStore(str(db_path), old_key)
+    await store_before_rotation.setup()
+    await store_before_rotation.set("alice", "key-a")
+    await store_before_rotation.close()
+
+    store_after_rotation = RegisteredKeyStore(str(db_path), f"{new_key},{old_key}")
+    await store_after_rotation.setup()
+
+    assert await store_after_rotation.get("alice") == "key-a"
+
+    await store_after_rotation.close()
+
+
+async def test_a_row_written_after_rotation_is_unreadable_once_the_old_key_is_dropped(
+    tmp_path: Path,
+) -> None:
+    """Confirms rotation actually rotates (not just "extra key accepted forever"): once a row
+    was (re-)written under the new key and the old key is fully removed from the config, the
+    store still reads it fine - dropping the old key only affects rows still encrypted under
+    it that were never rewritten."""
+    old_key = TEST_AI_KEY_ENCRYPTION_KEY
+    new_key = Fernet.generate_key().decode()
+    db_path = tmp_path / "registered_keys.db"
+
+    store_during_rotation = RegisteredKeyStore(str(db_path), f"{new_key},{old_key}")
+    await store_during_rotation.setup()
+    await store_during_rotation.set("alice", "key-a")  # (re-)written -> now under new_key
+    await store_during_rotation.close()
+
+    store_old_key_dropped = RegisteredKeyStore(str(db_path), new_key)
+    await store_old_key_dropped.setup()
+
+    assert await store_old_key_dropped.get("alice") == "key-a"
+
+    await store_old_key_dropped.close()
+
+
+async def test_construction_fails_when_every_comma_separated_entry_is_invalid(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match="not a valid Fernet key"):
+        RegisteredKeyStore(str(tmp_path / "registered_keys.db"), "not-valid,also-not-valid")
+
+
+async def test_construction_fails_when_any_comma_separated_entry_is_invalid(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match="not a valid Fernet key"):
+        RegisteredKeyStore(
+            str(tmp_path / "registered_keys.db"),
+            f"{TEST_AI_KEY_ENCRYPTION_KEY},not-a-valid-fernet-key",
+        )

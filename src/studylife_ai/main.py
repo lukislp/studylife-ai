@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from studylife_ai.agent.checkpoint_cleanup import run_periodic_checkpoint_cleanup
 from studylife_ai.api import agent, chat, health, internal
 from studylife_ai.config import get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
@@ -54,6 +55,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await checkpointer.setup()
         app.state.agent_checkpointer = checkpointer
 
+        # Sweeps stale (completed or never-confirmed) agent-checkpoint threads (audit A13/F14
+        # rest, see agent/checkpoint_cleanup.py) - unlike the ingestion sync loop above, this
+        # always runs: checkpoints accumulate regardless of whether STUDYLIFE_API_BASE_URL is
+        # configured at all.
+        cleanup_task = asyncio.create_task(run_periodic_checkpoint_cleanup(settings, checkpointer))
+
         try:
             yield
         finally:
@@ -61,6 +68,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 sync_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await sync_task
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
             await app.state.qdrant_store.close()
             await registered_key_store.close()
 

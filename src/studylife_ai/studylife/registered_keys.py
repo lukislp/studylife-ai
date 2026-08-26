@@ -14,13 +14,22 @@ each row is a full, usable StudyLife account credential, unlike StudyLife's
 own hash-only key storage, so plaintext SQLite storage was a real exposure.
 See config.py's `ai_key_encryption_key` for the key itself and
 studylife-mcp's oauth_store.py for the sibling project's identical pattern.
+
+AI_KEY_ENCRYPTION_KEY may hold one Fernet key or a comma-separated list of
+several (audit A13/F14 rest, 2026-08-26), wrapped in `cryptography`'s
+`MultiFernet`: the FIRST key encrypts every new/updated row, but ALL keys
+are tried to decrypt - so a key can be rotated (add the new key first in
+the list, keep the old one listed until every row has been re-written, e.g.
+by re-registering, then drop it) without a "big bang" re-encrypt migration
+and without orphaning rows still encrypted under the old key in the
+meantime. A single-key config keeps working completely unchanged.
 """
 
 import logging
 import sqlite3
 
 import aiosqlite
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +38,16 @@ _GENERATE_KEY_HINT = (
 )
 
 
-def _build_fernet(encryption_key: str | None) -> Fernet:
+def _build_fernet(encryption_key: str | None) -> MultiFernet:
     """Fails loudly and actionably (A4) rather than letting the service start with plaintext
     storage, or crash later on cryptography's own less specific ValueError. Called from
     RegisteredKeyStore.__init__, which every real entrypoint (main.py's app lifespan,
     ingestion.sync.sync_all()) constructs at startup - so this is effectively a startup check,
-    without needing its own separate validation pass."""
+    without needing its own separate validation pass.
+
+    Returns a `MultiFernet` even for a single configured key (A13/F14 rest) - its `encrypt`/
+    `decrypt` API is a drop-in superset of plain `Fernet`'s, so every call site below is
+    unchanged regardless of how many keys are configured."""
     if not encryption_key:
         raise RuntimeError(
             "AI_KEY_ENCRYPTION_KEY is not set. Every registered AiApiKey is a full, usable "
@@ -43,12 +56,21 @@ def _build_fernet(encryption_key: str | None) -> Fernet:
             f"  {_GENERATE_KEY_HINT}\n"
             "and set it as AI_KEY_ENCRYPTION_KEY (see .env.example)."
         )
+    raw_keys = [key.strip() for key in encryption_key.split(",") if key.strip()]
+    if not raw_keys:
+        raise RuntimeError(
+            "AI_KEY_ENCRYPTION_KEY is not set. Every registered AiApiKey is a full, usable "
+            "StudyLife account credential and must be encrypted at rest (see config.py's "
+            "ai_key_encryption_key). Generate one with:\n"
+            f"  {_GENERATE_KEY_HINT}\n"
+            "and set it as AI_KEY_ENCRYPTION_KEY (see .env.example)."
+        )
     try:
-        return Fernet(encryption_key.encode())
+        return MultiFernet([Fernet(key.encode()) for key in raw_keys])
     except ValueError as exc:
         raise RuntimeError(
-            "AI_KEY_ENCRYPTION_KEY is not a valid Fernet key (must be 32 url-safe "
-            "base64-encoded bytes). Generate one with:\n"
+            "AI_KEY_ENCRYPTION_KEY is not a valid Fernet key, or comma-separated list of "
+            "Fernet keys (each must be 32 url-safe base64-encoded bytes). Generate one with:\n"
             f"  {_GENERATE_KEY_HINT}"
         ) from exc
 
