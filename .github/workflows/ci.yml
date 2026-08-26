@@ -51,6 +51,13 @@ jobs:
           cache-suffix: "test"
       - run: uv python install 3.12
       - run: uv sync --frozen
+      # tests/contract/test_openapi_contract.py (audit finding D2/D3) is a normal part of this
+      # `uv run pytest` - it's just another module under tests/. Called out here because it
+      # behaves differently in CI than the rest of the suite: it fetches StudyLife's committed
+      # OpenAPI spec (docs/api/openapi.json in the studylife repo, via the module's default
+      # STUDYLIFE_OPENAPI_SPEC URL) and FAILS this job (not skips) if that spec is unreachable
+      # or this repo's DTO mirrors/client.py have drifted from it - see that module's own
+      # docstring for the full reachability policy (CI vs. local/offline dev).
       - run: uv run pytest
 
   # ---------------------------------------------------------------------
