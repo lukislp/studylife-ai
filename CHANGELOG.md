@@ -1,3 +1,10 @@
+## [1.16.2](https://github.com/lukislp/studylife-ai/compare/v1.16.1...v1.16.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* purge Qdrant and checkpoints on revoke, auto-clean zombie registrations ([adcbb0d](https://github.com/lukislp/studylife-ai/commit/adcbb0de3ac3a5765e50b6fc8c0d2ebbbc5cb111))
+
 ## [1.16.1](https://github.com/lukislp/studylife-ai/compare/v1.16.0...v1.16.1) (2026-08-25)
 
 
