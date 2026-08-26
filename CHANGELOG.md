@@ -1,3 +1,10 @@
+## [1.16.5](https://github.com/lukislp/studylife-ai/compare/v1.16.4...v1.16.5) (2026-08-26)
+
+
+### Bug Fixes
+
+* rebuild image under a fresh tag ([22479d9](https://github.com/lukislp/studylife-ai/commit/22479d9654e7a722cecb1bb11c9b82f44ab758a9))
+
 ## [1.16.4](https://github.com/lukislp/studylife-ai/compare/v1.16.3...v1.16.4) (2026-08-26)
 
 
