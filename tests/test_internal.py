@@ -74,6 +74,113 @@ async def test_register_key_returns_503_when_secret_not_configured(
     assert response.status_code == 503
 
 
+# --- Audit A5: split STUDYLIFE_INTERNAL_API_SECRET, with a legacy STUDYLIFE_SHARED_SECRET
+# fallback (may itself be a comma-separated list of accepted values). ---
+
+
+async def test_register_key_accepts_the_new_internal_api_secret(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "studylife_ai.api.internal.get_settings",
+        lambda: Settings(  # type: ignore[call-arg]
+            studylife_shared_secret=None, studylife_internal_api_secret="new-internal-secret"
+        ),
+    )
+
+    response = await client.post(
+        "/internal/register-key",
+        json={"user_id": "alice", "ai_api_key": "key-a"},
+        headers={SHARED_SECRET_HEADER: "new-internal-secret"},
+    )
+
+    assert response.status_code == 200
+
+
+async def test_register_key_rejects_the_legacy_secret_once_the_new_one_replaces_it(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "studylife_ai.api.internal.get_settings",
+        lambda: Settings(  # type: ignore[call-arg]
+            studylife_shared_secret=None, studylife_internal_api_secret="new-internal-secret"
+        ),
+    )
+
+    response = await client.post(
+        "/internal/register-key",
+        json={"user_id": "alice", "ai_api_key": "key-a"},
+        headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_register_key_accepts_either_value_of_a_comma_separated_internal_api_secret(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Rotation (audit A5): both the old and the new value are accepted while both are listed,
+    so StudyLife's backend (which always sends only the first value from its own config) can
+    switch over without a coordinated cutover."""
+    monkeypatch.setattr(
+        "studylife_ai.api.internal.get_settings",
+        lambda: Settings(  # type: ignore[call-arg]
+            studylife_shared_secret=None,
+            studylife_internal_api_secret="new-internal-secret,old-internal-secret",
+        ),
+    )
+
+    for secret in ("new-internal-secret", "old-internal-secret"):
+        response = await client.post(
+            "/internal/register-key",
+            json={"user_id": "alice", "ai_api_key": "key-a"},
+            headers={SHARED_SECRET_HEADER: secret},
+        )
+        assert response.status_code == 200
+
+
+async def test_register_key_still_accepts_the_legacy_secret_while_it_is_configured(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Rollout compatibility (audit A5): the legacy secret keeps working alongside the new one,
+    not just as an either/or fallback - so StudyLife's backend and studylife-ai can deploy the
+    split independently, in either order."""
+    monkeypatch.setattr(
+        "studylife_ai.api.internal.get_settings",
+        lambda: Settings(  # type: ignore[call-arg]
+            studylife_shared_secret=TEST_SHARED_SECRET,
+            studylife_internal_api_secret="new-internal-secret",
+        ),
+    )
+
+    for secret in ("new-internal-secret", TEST_SHARED_SECRET):
+        response = await client.post(
+            "/internal/register-key",
+            json={"user_id": "alice", "ai_api_key": "key-a"},
+            headers={SHARED_SECRET_HEADER: secret},
+        )
+        assert response.status_code == 200
+
+
+async def test_register_key_returns_503_when_neither_secret_is_configured(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "studylife_ai.api.internal.get_settings",
+        lambda: Settings(  # type: ignore[call-arg]
+            studylife_shared_secret=None, studylife_internal_api_secret=None
+        ),
+    )
+
+    response = await client.post(
+        "/internal/register-key",
+        json={"user_id": "alice", "ai_api_key": "key-a"},
+        headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
+    )
+
+    assert response.status_code == 503
+
+
 async def test_register_key_schedules_auto_ingestion_for_the_new_user(
     client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:

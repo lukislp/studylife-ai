@@ -46,14 +46,38 @@ class Settings(BaseSettings):
     # private cert-manager CA (see k8s/04-app.yaml) - found live: httpx's default trust store
     # (certifi) has no reason to know a private, cluster-only CA.
     studylife_ca_cert_path: str | None = None
-    # Shared secret StudyLife signs per-request proxy tokens with (see
-    # api/identity.py, docs/decisions.md "M4.5 Multi-user support" - "Auth
-    # flow, take two"). Must match the same value configured on the
-    # StudyLife side exactly - a mismatch makes every /chat and /agent
-    # request fail with 401. Also authenticates POST /internal/register-key
-    # and /internal/revoke-key (a simpler constant-time bearer-secret check,
-    # not the signed-token scheme - those aren't per-user requests).
+    # LEGACY, audit A5 (2026-08-26): the original single shared secret, used for BOTH
+    # verifying per-request proxy tokens (api/identity.py) AND authenticating
+    # /internal/register-key /revoke-key /enrich-capture (api/internal.py) - split into
+    # `studylife_token_signing_secret` / `studylife_internal_api_secret` below because anyone
+    # holding this one value could mint a proxy token for ANY user_id *and* administer the
+    # registry, with no key-id to support rotation without a simultaneous-redeploy 401 window.
+    # Kept as a fallback ONLY: while either new setting is unset, this is used in its place (a
+    # one-time deprecation warning is logged) so StudyLife's backend and studylife-ai can
+    # deploy the split independently, in either order - see docs/decisions.md "Split the
+    # shared secret (audit A5)". Also still accepted, verbatim, as a legacy 3-part
+    # (un-keyed) proxy-token format while it's configured, regardless of whether the new
+    # signing secret is also set - same rollout-order reasoning.
     studylife_shared_secret: str | None = None
+    # Verifies per-request proxy tokens StudyLife's backend signs (see api/identity.py,
+    # docs/decisions.md "M4.5 Multi-user support" - "Auth flow, take two", and "Split the
+    # shared secret (audit A5)"). One or more comma-separated `kid:secret` entries, e.g.
+    # `v1:abc...,v2:def...` - every entry is a valid verification key (looked up by the `kid`
+    # embedded in the token, `{user_id}.{expiry}.{kid}.{sig}`), so an older `kid` can still be
+    # verified while StudyLife's backend has already rotated to signing with a newer one.
+    # StudyLife's own `StudyLifeAi:TokenSigningSecret` always SIGNS with the first entry - this
+    # side just needs every currently-valid entry to be listed here too. No default: falls
+    # back to `studylife_shared_secret` (legacy, un-keyed 3-part format) while unset.
+    studylife_token_signing_secret: str | None = None
+    # Authenticates POST /internal/register-key, /internal/revoke-key, /internal/enrich-capture
+    # (constant-time bearer-secret check against `X-StudyLife-Shared-Secret` - a simpler check
+    # than the signed-token scheme above, since these aren't per-user requests). May itself be
+    # a comma-separated list of ACCEPTED values (unlike the signing secret above, there's no
+    # key-id here - it's a plain static bearer) - rotate by listing both the old and the new
+    # value here while StudyLife's backend (which always sends only the first value configured
+    # on its own `StudyLifeAi:InternalApiSecret`) is switched over, then drop the old one. No
+    # default: falls back to `studylife_shared_secret` (legacy) while unset.
+    studylife_internal_api_secret: str | None = None
     # Lookback window for GET /api/sessions/history (see docs/decisions.md
     # "Ingestion scope expansion"). ~5 years, measured from "now" every sync
     # run - it IS a rolling window: a session older than this eventually
@@ -179,6 +203,17 @@ class Settings(BaseSettings):
     # lose a pending action on restart, which a write-confirmation flow
     # specifically must not do.
     agent_checkpoint_db_path: str = "agent_checkpoints.db"
+
+    # Checkpoint TTL sweep (audit A13/F14 rest, 2026-08-26): completed AND never-confirmed
+    # ("pending", proposed but neither /agent/confirm'd nor rejected) agent threads otherwise
+    # accumulate in `agent_checkpoint_db_path` forever - nothing else ever deletes a thread
+    # except an explicit /internal/revoke-key purge (ingestion/sync.py's purge_user) or a
+    # failed agent run (api/agent.py's _invoke_and_handle_failure). See
+    # agent/checkpoint_cleanup.py and docs/decisions.md.
+    agent_checkpoint_ttl_days: int = 30
+    # How often the in-process background loop (main.py's lifespan, same pattern as
+    # ingestion/scheduler.py's run_periodic_sync) sweeps for threads past the TTL above.
+    agent_checkpoint_cleanup_interval_seconds: int = 3600
 
     # M4.5 (see docs/decisions.md "M4.5 Multi-user support"): SQLite file
     # backing the per-user AiApiKey registry - populated by StudyLife's

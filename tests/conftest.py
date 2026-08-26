@@ -42,6 +42,17 @@ def _reset_rate_limit_windows() -> None:
     rate_limit._windows.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_legacy_signing_fallback_warning() -> None:
+    """identity._warned_legacy_signing_fallback is module-level "warn once" state (audit A5) -
+    same leak-between-tests reasoning as `_reset_rate_limit_windows` above. Every test using
+    `client` mints a legacy 3-part token by default (see `make_proxy_token`), so without this
+    reset only the very first test in the whole run would ever observe the warning."""
+    from studylife_ai.api import identity
+
+    identity._warned_legacy_signing_fallback = False
+
+
 def make_proxy_token(
     user_id: str, *, secret: str = TEST_SHARED_SECRET, expires_in: int = 60
 ) -> str:

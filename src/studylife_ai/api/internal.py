@@ -4,10 +4,17 @@ support" - "Registration-on-generate"). Not part of the public /chat, /agent
 surface - meant to be reachable only from StudyLife's backend, same trust
 boundary as the rest of the service.
 
-Authenticated by a constant-time comparison of a shared secret (the same
-`Settings.studylife_shared_secret` used to verify per-request proxy tokens
-in api/identity.py) - a plain bearer-secret check, not the signed-token
-scheme, since these aren't per-user requests.
+Authenticated by a constant-time comparison of a shared secret against
+`Settings.studylife_internal_api_secret` (a plain bearer-secret check, not
+the signed-token scheme in api/identity.py, since these aren't per-user
+requests) - split out from the token-signing secret in audit A5 (2026-08-26,
+see docs/decisions.md "Split the shared secret (audit A5)"): previously the
+single `Settings.studylife_shared_secret` both signed per-user proxy tokens
+AND authenticated this trust boundary, so anyone holding it could also
+administer the registry, not just impersonate a user. `studylife_shared_secret`
+is still accepted here as a legacy fallback while configured, and
+`studylife_internal_api_secret` may itself be a comma-separated list of
+*accepted* values (rotation - see config.py).
 """
 
 import hmac
@@ -15,7 +22,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from studylife_ai.config import get_settings
+from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.sync import purge_user, sync_user
 from studylife_ai.rag.enrichment import enrich_capture
@@ -33,14 +40,37 @@ router = APIRouter(tags=["internal"])
 SHARED_SECRET_HEADER = "X-StudyLife-Shared-Secret"
 
 
+def _accepted_internal_secrets(settings: Settings) -> list[str]:
+    """Every bearer value `/internal/*` accepts (audit A5): each comma-separated entry of
+    `studylife_internal_api_secret` (StudyLife's own `AiProxyClient` always SENDS only the
+    first value it has configured - this side is what holds multiple *accepted* values during
+    a rotation), plus the legacy `studylife_shared_secret` while that fallback is still
+    configured."""
+    accepted: list[str] = []
+    if settings.studylife_internal_api_secret:
+        accepted.extend(
+            value.strip()
+            for value in settings.studylife_internal_api_secret.split(",")
+            if value.strip()
+        )
+    if settings.studylife_shared_secret:
+        accepted.append(settings.studylife_shared_secret)
+    return accepted
+
+
 def _require_valid_secret(http_request: Request) -> None:
     settings = get_settings()
-    if not settings.studylife_shared_secret:
+    accepted = _accepted_internal_secrets(settings)
+    if not accepted:
         raise HTTPException(
-            status_code=503, detail="STUDYLIFE_SHARED_SECRET must be set for this endpoint."
+            status_code=503,
+            detail=(
+                "STUDYLIFE_INTERNAL_API_SECRET (or the legacy STUDYLIFE_SHARED_SECRET) must "
+                "be set for this endpoint."
+            ),
         )
     provided = http_request.headers.get(SHARED_SECRET_HEADER)
-    if not provided or not hmac.compare_digest(provided, settings.studylife_shared_secret):
+    if not provided or not any(hmac.compare_digest(provided, secret) for secret in accepted):
         raise HTTPException(status_code=401, detail="Invalid or missing shared secret.")
 
 
