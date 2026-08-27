@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   # Lets a stuck/skipped release be manually re-flushed against the CURRENT tip of main (see
-  # get-version's checkout-refresh step below) - a plain "Re-run jobs" on an old push-triggered
+  # get-version's ref: main checkout below) - a plain "Re-run jobs" on an old push-triggered
   # run reuses that run's original, by-then-stale github.sha and can never succeed once main has
   # moved past it (found live 2026-08-21: two PRs merged ~5 minutes apart, the second push's
   # get-version dry run saw "local branch is behind the remote" and skipped semantic-release/
@@ -80,21 +80,19 @@ jobs:
       next_version: ${{ steps.semrel.outputs.new_release_version }}
       published: ${{ steps.semrel.outputs.new_release_published }}
     steps:
+      # ref: main (branch tip), NOT the push-event SHA: Flux's image-update automation commits
+      # "[skip ci]" bumps to main that can land between the triggering push and this job actually
+      # running. semantic-release's "local branch is behind the remote" guard then analyzes a
+      # stale SHA and releases nothing - the entire release chain skips even though a releasable
+      # fix was just merged. Analyzing the branch tip makes the verdict immune to that race; the
+      # tip only ever differs by those [skip ci] bump commits. This also covers the
+      # workflow_dispatch re-run case above: ref: main always resolves to the CURRENT tip
+      # regardless of which run triggered this job, instead of staying pinned to a stale
+      # github.sha that can already be arbitrarily far behind main by the time this job runs.
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      # actions/checkout above pins to github.sha - correct for a fresh push event, but a stale
-      # ref for a workflow_dispatch re-run of an OLD run (github.sha there is still whatever
-      # commit originally triggered it) and, more importantly, for a plain "Re-run jobs" on a
-      # push-triggered run once main has since moved past that commit (see the workflow_dispatch
-      # comment above for the incident this fixes). Re-syncing to the actual current tip here,
-      # right before semantic-release's own dry-run check, minimizes the "local branch is behind
-      # the remote" staleness window instead of leaving get-version pinned to a commit that can
-      # already be arbitrarily far behind main by the time this job actually runs.
-      - name: Sync to the current tip of main
-        run: |
-          git fetch origin main
-          git checkout -B main origin/main
+          ref: main
       - id: semrel
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
@@ -136,7 +134,12 @@ jobs:
     env:
       NEXT_VERSION: ${{ needs.get-version.outputs.next_version }}
     steps:
+      # ref: main to match get-version's analysis target - the artifact stamped with the next
+      # version must be built from the same tree that version was computed for, not from an
+      # event SHA that may be a [skip ci] bump behind it.
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -234,9 +237,14 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      # ref: main for the same reason as get-version's checkout: the real release must be cut
+      # from the branch tip get-version analyzed, or the "behind the remote" guard trips on the
+      # event SHA whenever a [skip ci] bump raced in. The retry below still covers a push landing
+      # DURING this job (i.e. after this checkout, before this job's own push).
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
+          ref: main
       - id: semrel
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
