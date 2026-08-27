@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 
 import litellm
 
+from studylife_ai.llm.retry import with_retry
 from studylife_ai.schemas.chat import ChatMessage
 
 
@@ -32,15 +33,23 @@ async def stream_chat_completion(
     omits the parameter entirely - LiteLLM strips `None` completion kwargs
     before sending the request, same as `complete_chat`'s `temperature` -
     correct for non-reasoning models, which don't accept this parameter.
+
+    Retries (see `llm/retry.py`) only cover establishing the stream itself - a transient
+    failure (timeout/429/5xx) before the first chunk is retried; once chunks have started
+    arriving, a failure mid-stream propagates directly, since some content may already have
+    been yielded to the caller and can't be un-sent.
     """
-    response = await litellm.acompletion(
-        model=model,
-        messages=[m.model_dump() for m in messages],
-        api_base=api_base,
-        timeout=timeout,
-        stream=True,
-        reasoning_effort=reasoning_effort,
-        metadata={"call_site": call_site, "user_id": user_id},
+    response = await with_retry(
+        lambda: litellm.acompletion(
+            model=model,
+            messages=[m.model_dump() for m in messages],
+            api_base=api_base,
+            timeout=timeout,
+            stream=True,
+            reasoning_effort=reasoning_effort,
+            metadata={"call_site": call_site, "user_id": user_id},
+        ),
+        call_site=call_site,
     )
     async for chunk in response:
         delta = chunk.choices[0].delta.content
@@ -69,15 +78,22 @@ async def complete_chat(
     LiteLLM strips `None` completion kwargs before sending the request, so
     this is equivalent to not passing them at all. `reasoning_effort` only
     matters for reasoning models (e.g. `RERANK_MODEL=openai/gpt-5-mini`) -
-    see `Settings.llm_reasoning_effort`'s docstring for why it's needed."""
-    response = await litellm.acompletion(
-        model=model,
-        messages=[m.model_dump() for m in messages],
-        api_base=api_base,
-        timeout=timeout,
-        stream=False,
-        temperature=temperature,
-        reasoning_effort=reasoning_effort,
-        metadata={"call_site": call_site, "user_id": user_id},
+    see `Settings.llm_reasoning_effort`'s docstring for why it's needed.
+
+    Retries a transient failure (timeout/429/5xx) up to twice with backoff before giving up
+    (see `llm/retry.py`) - safe to retry the whole call here, unlike `stream_chat_completion`,
+    since nothing is returned to the caller until the full response is in."""
+    response = await with_retry(
+        lambda: litellm.acompletion(
+            model=model,
+            messages=[m.model_dump() for m in messages],
+            api_base=api_base,
+            timeout=timeout,
+            stream=False,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            metadata={"call_site": call_site, "user_id": user_id},
+        ),
+        call_site=call_site,
     )
     return response.choices[0].message.content or ""
