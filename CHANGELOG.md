@@ -1,3 +1,10 @@
+## [1.16.6](https://github.com/lukislp/studylife-ai/compare/v1.16.5...v1.16.6) (2026-08-27)
+
+
+### Bug Fixes
+
+* harden the agent path against injection and transient failures ([2a935d6](https://github.com/lukislp/studylife-ai/commit/2a935d6cbd185d8f8e851896fbf2aea7b720e2dc))
+
 ## [1.16.5](https://github.com/lukislp/studylife-ai/compare/v1.16.4...v1.16.5) (2026-08-26)
 
 
