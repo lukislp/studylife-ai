@@ -13,6 +13,7 @@ answer, clearly marked as not from the notes.
 
 from studylife_ai.ingestion.qdrant_store import ContentType, RetrievedChunk
 from studylife_ai.schemas.chat import Source
+from studylife_ai.text_escaping import escape_untrusted_text
 
 _CONTENT_TYPE_LABELS: dict[ContentType, str] = {
     "note": "Note",
@@ -57,14 +58,6 @@ _SYSTEM_PROMPT_TEMPLATE = (
 _NO_NOTES_FOUND = "(no matching notes found)"
 
 
-def _escape_note_text(text: str) -> str:
-    """Neutralize literal `<`/`>` so note content can't fake a `</notes>` closing tag
-    and break out of the data boundary above (prompt-injection defense) — a note's
-    content is untrusted as far as prompt structure is concerned, even though it's
-    the user's own data, since it could contain text pasted from anywhere."""
-    return text.replace("<", "&lt;").replace(">", "&gt;")
-
-
 def _group_by_source(
     chunks: list[RetrievedChunk],
 ) -> dict[tuple[ContentType, int], list[RetrievedChunk]]:
@@ -89,8 +82,8 @@ def build_context_system_message(chunks: list[RetrievedChunk]) -> str:
     else:
         notes_block = "\n\n".join(
             f"[{index}] {_CONTENT_TYPE_LABELS[content_type]}: "
-            f"{_escape_note_text(entity_chunks[0].title)}\n"
-            + " [...] ".join(_escape_note_text(chunk.content) for chunk in entity_chunks)
+            f"{escape_untrusted_text(entity_chunks[0].title)}\n"
+            + " [...] ".join(escape_untrusted_text(chunk.content) for chunk in entity_chunks)
             for index, ((content_type, _entity_id), entity_chunks) in enumerate(
                 grouped.items(), start=1
             )

@@ -2,14 +2,26 @@ from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
 from langchain_core.messages import AIMessage, ToolCall
+from litellm.exceptions import Timeout as LiteLLMTimeout
 from pytest import MonkeyPatch
 
+from studylife_ai.api import agent as agent_module
 from studylife_ai.api.identity import PROXY_TOKEN_HEADER
 from studylife_ai.config import Settings
 from studylife_ai.main import app
-from studylife_ai.studylife.models import StudySessionDto
+from studylife_ai.studylife.models import CourseDto, StudySessionDto
 from tests.conftest import TEST_SHARED_SECRET, TEST_USER_ID, make_proxy_token
 from tests.fakes import FakeToolCallingModel
+
+
+def test_agent_system_prompt_frames_search_notes_output_as_untrusted_data() -> None:
+    """Regression test: the agent's system prompt must state that tool-returned note content
+    (search_notes) is untrusted data, never instructions - see docs/decisions.md and
+    agent/tools.py's own per-call framing on the tool output itself (belt-and-braces)."""
+    assert "untrusted" in agent_module._AGENT_SYSTEM_PROMPT.lower()
+    assert "search_notes" in agent_module._AGENT_SYSTEM_PROMPT
+    assert "never" in agent_module._AGENT_SYSTEM_PROMPT.lower()
+
 
 _CREATE_SESSION_CALL = ToolCall(
     name="create_study_session",
@@ -33,7 +45,13 @@ def _agent_settings(**overrides: object) -> Settings:
     return Settings(**defaults)  # type: ignore[arg-type]
 
 
-async def _install_fake_agent(monkeypatch: MonkeyPatch, responses: list[AIMessage]) -> AsyncMock:
+async def _install_fake_agent(
+    monkeypatch: MonkeyPatch,
+    responses: list[AIMessage],
+    *,
+    fail_on_call_index: int | None = None,
+    fail_exception: Exception | None = None,
+) -> AsyncMock:
     """Stands in for the two things api/agent.py._build_agent()
     constructs per request: the StudyLifeClient (a fake, so tool calls never
     hit real HTTP) and the model bound inside build_agent() (ChatLiteLLM,
@@ -43,7 +61,13 @@ async def _install_fake_agent(monkeypatch: MonkeyPatch, responses: list[AIMessag
     reaching StudyLifeClient. The checkpointer itself is NOT faked here -
     api/agent.py reads the real one the app's lifespan already builds
     (see main.py), which is fine across tests since each uses a fresh random
-    thread_id."""
+    thread_id.
+
+    `fail_on_call_index`/`fail_exception` (see FakeToolCallingModel) simulate a transient
+    provider failure at a specific model call within the run - the same fake model instance
+    is reused across /agent and /agent/confirm (both call _build_agent, which is monkeypatched
+    to keep returning this one object), so its call-count state persists across that boundary
+    exactly like the real per-thread checkpointed run would."""
     fake_studylife = AsyncMock()
     # api/agent.py uses `async with studylife_client:` on an already-built
     # instance - AsyncMock's default __aenter__ return value is a DIFFERENT
@@ -58,7 +82,9 @@ async def _install_fake_agent(monkeypatch: MonkeyPatch, responses: list[AIMessag
         start_time="2026-08-12T10:00:00",  # type: ignore[arg-type]
         end_time="2026-08-12T11:00:00",  # type: ignore[arg-type]
     )
-    fake_model = FakeToolCallingModel(responses=responses)
+    fake_model = FakeToolCallingModel(
+        responses=responses, fail_on_call_index=fail_on_call_index, fail_exception=fail_exception
+    )
     # build_agent has no model= override - ChatLiteLLM is constructed inside
     # it, so swap that constructor for the duration of this build() call.
     monkeypatch.setattr("studylife_ai.agent.graph.ChatLiteLLM", lambda **kwargs: fake_model)
@@ -277,3 +303,97 @@ async def test_agent_confirm_tool_failure_returns_502_and_invalidates_thread(
         "/agent/confirm", json={"thread_id": thread_id, "decision": "approve"}
     )
     assert retry_response.status_code == 404
+
+
+async def test_agent_confirm_transient_failure_preserves_checkpoint_for_retry(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Regression test (docs/decisions.md "Preserve the checkpoint on a transient agent
+    failure"): unlike a permanent failure (see the 502 test above), a one-off provider hiccup
+    (timeout/429/5xx) during POST /agent/confirm must NOT discard the pending action - the
+    same thread_id must still be resumable afterwards, so the client can just retry the
+    confirm call instead of losing the whole propose-confirm flow.
+
+    The failure is placed in the model's SECOND call (index 1) - the follow-up "here's what I
+    did" call that runs AFTER create_study_session has already executed successfully, not in
+    the tool call itself - so this also verifies the tool isn't silently re-invoked by the
+    retry (`create_session.assert_awaited_once()` below): only the model step that actually
+    failed needs to be retried, since LangGraph only re-runs a step that never completed."""
+    propose = AIMessage(content="", tool_calls=[_CREATE_SESSION_CALL])
+    fake_studylife = await _install_fake_agent(
+        monkeypatch,
+        [propose, AIMessage(content="Session erstellt.")],
+        fail_on_call_index=1,
+        fail_exception=LiteLLMTimeout(
+            message="upstream timed out", model="test-model", llm_provider="test-provider"
+        ),
+    )
+
+    propose_response = await client.post(
+        "/agent", json={"message": "leg mir eine Session für Lineare Algebra an"}
+    )
+    thread_id = propose_response.json()["pending_actions"][0]["thread_id"]
+
+    confirm_response = await client.post(
+        "/agent/confirm", json={"thread_id": thread_id, "decision": "approve"}
+    )
+    assert confirm_response.status_code == 503
+    # The tool itself already succeeded on this first attempt - only the follow-up model call
+    # failed.
+    fake_studylife.create_session.assert_awaited_once()
+
+    # Retry the exact same confirm call against the exact same thread_id - it must still be
+    # pending, not 404 (contrast with the permanent-failure test above, which expects exactly
+    # a 404 here).
+    retry_response = await client.post(
+        "/agent/confirm", json={"thread_id": thread_id, "decision": "approve"}
+    )
+
+    assert retry_response.status_code == 200
+    assert retry_response.json()["answer"] == "Session erstellt."
+    # Still exactly once - the retry did not re-run the already-completed tool call.
+    fake_studylife.create_session.assert_awaited_once()
+
+
+async def test_agent_pending_action_shows_real_catalog_course_name(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Regression test: the human-confirmation display previously showed whatever
+    `course_name` the model typed into create_study_session's args verbatim - even though
+    StudyLife's own API ignores that field and derives the real name from `course_id`
+    server-side (see docs/decisions.md "F15/O6-ai phase B"). The model can get the display
+    name wrong (e.g. a stale/mistranslated name); the confirmation should show the real
+    catalog name, resolved from the already-fetched list_courses result, not the model's own
+    text - so the user confirms against truth."""
+    list_courses_call = ToolCall(name="list_courses", args={}, id="call_0", type="tool_call")
+    list_then_create = AIMessage(content="", tool_calls=[list_courses_call])
+    propose = AIMessage(
+        content="",
+        tool_calls=[
+            ToolCall(
+                name="create_study_session",
+                args={
+                    "course_id": 6,
+                    "course_name": "Linear Algebra (wrong/stale name)",
+                    "start_time": "2026-08-12T10:00:00",
+                    "end_time": "2026-08-12T11:00:00",
+                },
+                id="call_1",
+                type="tool_call",
+            )
+        ],
+    )
+    fake_studylife = await _install_fake_agent(
+        monkeypatch, [list_then_create, propose, AIMessage(content="Done.")]
+    )
+    fake_studylife.get_courses.return_value = [
+        CourseDto(id=6, semester=3, name="Lineare Algebra", code="MATH101", ects=5)
+    ]
+
+    response = await client.post(
+        "/agent", json={"message": "leg mir eine Session für Lineare Algebra an"}
+    )
+
+    assert response.status_code == 200
+    args = response.json()["pending_actions"][0]["args"]
+    assert args["course_name"] == "Lineare Algebra"

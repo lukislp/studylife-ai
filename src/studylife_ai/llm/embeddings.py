@@ -7,6 +7,8 @@ selects the provider (e.g. "openai/text-embedding-3-small" or
 
 import litellm
 
+from studylife_ai.llm.retry import with_retry
+
 
 async def embed_texts(
     texts: list[str], *, model: str, call_site: str = "unknown", user_id: str = "unknown"
@@ -15,11 +17,17 @@ async def embed_texts(
 
     `call_site`/`user_id` are pure logging metadata (see `llm/logging.py`
     and `llm/metrics.py`) - neither ever reaches the model.
+
+    Retries a transient failure (timeout/429/5xx) up to twice with backoff before giving up
+    (see `llm/retry.py`), same mechanism as `llm/client.py`'s `complete_chat`.
     """
     if not texts:
         return []
-    response = await litellm.aembedding(
-        model=model, input=texts, metadata={"call_site": call_site, "user_id": user_id}
+    response = await with_retry(
+        lambda: litellm.aembedding(
+            model=model, input=texts, metadata={"call_site": call_site, "user_id": user_id}
+        ),
+        call_site=call_site,
     )
     ordered = sorted(response.data, key=lambda item: item["index"])
     return [item["embedding"] for item in ordered]
