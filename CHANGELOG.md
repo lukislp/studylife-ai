@@ -1,3 +1,11 @@
+## [1.16.7](https://github.com/lukislp/studylife-ai/compare/v1.16.6...v1.16.7) (2026-08-27)
+
+
+### Bug Fixes
+
+* release chain checks out branch tip to survive [skip ci] bump races ([6b81da7](https://github.com/lukislp/studylife-ai/commit/6b81da735d067235bb2e4f01fa2dd2980c6173de))
+* retrigger release chain (merge push of [#22](https://github.com/lukislp/studylife-ai/issues/22) spawned no workflow run) ([cf07052](https://github.com/lukislp/studylife-ai/commit/cf07052b748bcbaa8c5c6dd6e8320d17de674fbc))
+
 ## [1.16.6](https://github.com/lukislp/studylife-ai/compare/v1.16.5...v1.16.6) (2026-08-27)
 
 
