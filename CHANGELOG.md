@@ -1,3 +1,10 @@
+## [1.16.8](https://github.com/lukislp/studylife-ai/compare/v1.16.7...v1.16.8) (2026-09-03)
+
+
+### Bug Fixes
+
+* **ci:** add Dependabot for github-actions, uv, docker ([3a367f3](https://github.com/lukislp/studylife-ai/commit/3a367f3a9e2476658a9a62caae0653696919363a))
+
 ## [1.16.7](https://github.com/lukislp/studylife-ai/compare/v1.16.6...v1.16.7) (2026-08-27)
 
 
