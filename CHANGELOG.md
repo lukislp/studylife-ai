@@ -1,3 +1,10 @@
+## [1.16.12](https://github.com/lukislp/studylife-ai/compare/v1.16.11...v1.16.12) (2026-09-04)
+
+
+### Bug Fixes
+
+* **deps:** bump cryptography from 48.0.1 to 50.0.1 ([4f339e9](https://github.com/lukislp/studylife-ai/commit/4f339e9e584da15d21fc72fcde44a7e4f371fbd0))
+
 ## [1.16.11](https://github.com/lukislp/studylife-ai/compare/v1.16.10...v1.16.11) (2026-09-04)
 
 
