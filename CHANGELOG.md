@@ -1,3 +1,17 @@
+## [1.16.9](https://github.com/lukislp/studylife-ai/compare/v1.16.8...v1.16.9) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ci:** bump aquasecurity/trivy-action ([afc2eaf](https://github.com/lukislp/studylife-ai/commit/afc2eaf7241c85f39add140d9d430fdb8921b66f))
+* **ci:** bump astral-sh/setup-uv from 9.0.0 to 10.0.1 ([74a95c5](https://github.com/lukislp/studylife-ai/commit/74a95c54c5a464cbe064842cd83e117cb2efa785))
+* **ci:** bump docker/setup-buildx-action from 4.2.0 to 4.3.0 ([60f04f7](https://github.com/lukislp/studylife-ai/commit/60f04f7294e6028ac1ca486eebfe74726cc4c72a))
+* **deps:** bump langchain from 1.3.2 to 1.3.18 ([a1474cf](https://github.com/lukislp/studylife-ai/commit/a1474cf0733282e280a67c6a9b6d57ed1335e85c))
+* **deps:** bump langchain-litellm from 0.7.0 to 0.7.1 ([d0d9598](https://github.com/lukislp/studylife-ai/commit/d0d95981633105efa85542ddb14d128ef0d304af))
+* **deps:** bump langgraph from 1.2.2 to 1.2.11 ([f27268c](https://github.com/lukislp/studylife-ai/commit/f27268c687d5b42f722ed87957a26cec118b64a6))
+* **deps:** bump pydantic from 2.13.4 to 2.13.5 ([bab4051](https://github.com/lukislp/studylife-ai/commit/bab40514183a390311f7f46a135895e3ed53d30e))
+* **deps:** bump tiktoken from 0.13.0 to 0.14.0 ([ffacc6a](https://github.com/lukislp/studylife-ai/commit/ffacc6a7457df382916d683040571dc8fdaa5c02))
+
 ## [1.16.8](https://github.com/lukislp/studylife-ai/compare/v1.16.7...v1.16.8) (2026-09-03)
 
 
