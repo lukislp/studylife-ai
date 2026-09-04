@@ -1,3 +1,10 @@
+## [1.16.10](https://github.com/lukislp/studylife-ai/compare/v1.16.9...v1.16.10) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ci:** ignore base image major bumps in Dependabot ([237c4d5](https://github.com/lukislp/studylife-ai/commit/237c4d5c077989c3cf9e6ca8c05f745ab49430d1))
+
 ## [1.16.9](https://github.com/lukislp/studylife-ai/compare/v1.16.8...v1.16.9) (2026-09-04)
 
 
