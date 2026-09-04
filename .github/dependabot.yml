@@ -19,3 +19,6 @@ updates:
       interval: weekly
     commit-message:
       prefix: "fix(docker)"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
