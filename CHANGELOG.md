@@ -1,3 +1,10 @@
+## [1.16.13](https://github.com/lukislp/studylife-ai/compare/v1.16.12...v1.16.13) (2026-09-11)
+
+
+### Bug Fixes
+
+* **ci:** push release commits as a deploy key so the default branch can be ruleset-protected ([b551fb1](https://github.com/lukislp/studylife-ai/commit/b551fb1faa433aebc35538b6ed3efb3551f8a803))
+
 ## [1.16.12](https://github.com/lukislp/studylife-ai/compare/v1.16.11...v1.16.12) (2026-09-04)
 
 
