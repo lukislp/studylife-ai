@@ -10,6 +10,11 @@ on:
   push:
     branches: [main]
 
+# Least-privilege default for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions):
+# jobs that need more declare it themselves.
+permissions:
+  contents: read
+
 jobs:
   changes:
     # Cheap pre-check so `eval` (see below) doesn't run its full pass on every push - only
