@@ -30,8 +30,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.5.8"
           cache-suffix: "lint"
@@ -44,8 +44,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.5.8"
           cache-suffix: "test"
@@ -89,7 +89,7 @@ jobs:
       # workflow_dispatch re-run case above: ref: main always resolves to the CURRENT tip
       # regardless of which run triggered this job, instead of staying pinned to a stale
       # github.sha that can already be arbitrarily far behind main by the time this job runs.
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: main
@@ -160,7 +160,7 @@ jobs:
       # ref: main to match get-version's analysis target - the artifact stamped with the next
       # version must be built from the same tree that version was computed for, not from an
       # event SHA that may be a [skip ci] bump behind it.
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -189,7 +189,7 @@ jobs:
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: digests-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -206,7 +206,7 @@ jobs:
     env:
       NEXT_VERSION: ${{ needs.get-version.outputs.next_version }}
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: /tmp/digests
           pattern: digests-*
@@ -264,7 +264,7 @@ jobs:
       # from the branch tip get-version analyzed, or the "behind the remote" guard trips on the
       # event SHA whenever a [skip ci] bump raced in. The retry below still covers a push landing
       # DURING this job (i.e. after this checkout, before this job's own push).
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: main
