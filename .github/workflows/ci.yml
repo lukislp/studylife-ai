@@ -184,6 +184,14 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=app-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=app-${{ matrix.arch }}
+          # Supply chain (2026-09-11 hardening): BuildKit attaches a SLSA provenance attestation
+          # (which commit/workflow built this, from which base image) and an SPDX SBOM to every
+          # per-arch image. They travel as extra "unknown/unknown" platform entries inside the
+          # pushed index - GHCR shows them as such, containerd/k3s ignore them when pulling,
+          # Trivy resolves the real linux/amd64 entry. imagetools create below carries them into
+          # the multi-arch manifest unchanged.
+          provenance: mode=max
+          sbom: true
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
@@ -203,6 +211,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # OIDC token for Sigstore keyless signing (cosign sign below) - no key material anywhere.
+      id-token: write
     env:
       NEXT_VERSION: ${{ needs.get-version.outputs.next_version }}
     steps:
@@ -226,6 +236,24 @@ jobs:
             $(printf "${{ env.IMAGE }}@sha256:%s " *)
       - name: Inspect the pushed manifest
         run: docker buildx imagetools inspect "${{ env.IMAGE }}:${{ env.NEXT_VERSION }}"
+      # Sigstore keyless signature on the multi-arch manifest DIGEST (2026-09-11 hardening), so
+      # every tag pointing at it (version, latest, sha-) is covered by one signature. The
+      # signing identity is this workflow's OIDC certificate (repo + workflow path + ref), the
+      # signature and the transparency-log entry live next to the image in GHCR. The verify
+      # step right after is the live proof for this run and the exact identity constraint Flux
+      # will use once its ImagePolicy verification is switched on (cluster phase).
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign the multi-arch manifest (Sigstore keyless) and verify
+        env:
+          IDENTITY_REGEXP: '^https://github\.com/lukislp/studylife-ai/\.github/workflows/ci\.yml@refs/heads/main$'
+        run: |
+          DIGEST="$(docker buildx imagetools inspect "${{ env.IMAGE }}:${{ env.NEXT_VERSION }}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          cosign sign --yes "${{ env.IMAGE }}@${DIGEST}"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY_REGEXP" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${{ env.IMAGE }}@${DIGEST}" --output text >/dev/null
+          echo "signed and verified ${{ env.IMAGE }}@${DIGEST}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   trivy:
     needs: [get-version, docker-manifest-merge]
