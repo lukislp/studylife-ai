@@ -5,11 +5,14 @@ name: Dependabot lock files
 # the referencing project's packages.lock.json) - and its uv lock output has shipped unparsable
 # files. Locked-mode restores then fail on the PR. This job runs on Dependabot's own PRs,
 # regenerates every lock file with the same tool versions CI uses and pushes the result back
-# onto the PR branch, after which the normal CI run and the auto-merge proceed. It runs on
-# pull_request_target so the push token is available; only manifests and lock files change in
-# a Dependabot PR, and nothing from the PR is executed beyond the package restore itself.
+# onto the PR branch, after which the normal CI run and the auto-merge proceed.
+#
+# Deliberately a plain pull_request run (no pull_request_target): the PR's own restore runs in
+# the untrusted context with a read-only GITHUB_TOKEN, and the only credential involved - the
+# push token - is a Dependabot secret, which GitHub exposes solely to runs Dependabot triggered
+# and only to the single step that pushes. Nothing from the PR ever sees it.
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -21,14 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HAS_TOKEN: ${{ secrets.AUTOMERGE_TOKEN != '' }}
+      HEAD_REF: ${{ github.head_ref }}
     steps:
       - if: env.HAS_TOKEN != 'true'
-        run: echo "AUTOMERGE_TOKEN is not set - lock files are not refreshed automatically"
+        run: echo "AUTOMERGE_TOKEN is not set as a Dependabot secret - lock files are not refreshed automatically"
       - if: env.HAS_TOKEN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          token: ${{ secrets.AUTOMERGE_TOKEN }}
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
       - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -53,6 +57,8 @@ jobs:
           uv lock
       - if: env.HAS_TOKEN == 'true'
         name: Push the refreshed lock files back onto the PR
+        env:
+          PUSH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
         run: |
           git add -A -- '**/packages.lock.json' 'packages.lock.json' uv.lock 2>/dev/null || true
           if git diff --cached --quiet; then
@@ -62,4 +68,4 @@ jobs:
           git config user.name "lukislp"
           git config user.email "koerber.lukas@t-online.de"
           git commit -m "chore(deps): refresh the lock files after the Dependabot update"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
