@@ -19,11 +19,10 @@ import sys
 import atheris
 from pydantic import ValidationError
 
-with atheris.instrument_imports():
-    from studylife_ai.schemas.agent import AgentRequest, ConfirmRequest
-    from studylife_ai.schemas.chat import ChatRequest
-    from studylife_ai.schemas.internal import EnrichCaptureRequest, RegisterKeyRequest
-    from studylife_ai.text_escaping import escape_untrusted_text
+from studylife_ai.schemas.agent import AgentRequest, ConfirmRequest
+from studylife_ai.schemas.chat import ChatRequest
+from studylife_ai.schemas.internal import EnrichCaptureRequest, RegisterKeyRequest
+from studylife_ai.text_escaping import escape_untrusted_text
 
 MODELS = (AgentRequest, ConfirmRequest, ChatRequest, EnrichCaptureRequest, RegisterKeyRequest)
 
@@ -41,5 +40,9 @@ def test_one_input(data: bytes) -> None:
 
 
 if __name__ == "__main__":
+    # instrument_all() instead of instrument_imports(): the package is loaded through uv's
+    # editable-install loader, which the import hook does not see (no coverage feedback,
+    # so libFuzzer would never grow its inputs past a few bytes).
+    atheris.instrument_all()
     atheris.Setup(sys.argv, test_one_input)
     atheris.Fuzz()
