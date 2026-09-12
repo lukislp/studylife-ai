@@ -123,21 +123,9 @@ jobs:
       # get-version too: @semantic-release/git's verifyConditions runs `git push --dry-run`
       # even in dry-run mode. Same mechanism as lukislp/studylife's ci-cd.yml.
       - name: Push as the semantic-release deploy key (if configured)
-        env:
-          DEPLOY_KEY: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$DEPLOY_KEY" ]; then
-            echo "SEMANTIC_RELEASE_DEPLOY_KEY is not set - semantic-release pushes with GITHUB_TOKEN"
-            exit 0
-          fi
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/semantic_release
-          chmod 600 ~/.ssh/semantic_release
-          # github.com's published ed25519 host key, pinned instead of ssh-keyscan'd at runtime:
-          # https://docs.github.com/en/authentication/keychain/githubs-ssh-key-fingerprints
-          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
-          git remote set-url origin "git@github.com:${{ github.repository }}.git"
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/semantic_release -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+        uses: lukislp/ci-workflows/.github/actions/deploy-key-push@7e63fcaccd6d5c152e694dea32184a2ce0823cd7 # v1.0.1
+        with:
+          deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
@@ -285,7 +273,7 @@ jobs:
   # reads this repo (its GitRepository carries no write token any more) and applies whatever the
   # default branch says.
   deploy-bump:
-    needs: [get-version, docker-manifest-merge]
+    needs: [get-version, docker-manifest-merge, trivy]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -304,19 +292,10 @@ jobs:
       # Same deploy-key push as the release jobs - the default branch only takes direct pushes
       # from that key, so this job cannot fall back to GITHUB_TOKEN.
       - name: Push as the semantic-release deploy key
-        env:
-          DEPLOY_KEY: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$DEPLOY_KEY" ]; then
-            echo "::error::SEMANTIC_RELEASE_DEPLOY_KEY is not set - the image tag bump cannot be pushed"
-            exit 1
-          fi
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/semantic_release
-          chmod 600 ~/.ssh/semantic_release
-          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
-          git remote set-url origin git@github.com:lukislp/studylife-ai.git
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/semantic_release -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+        uses: lukislp/ci-workflows/.github/actions/deploy-key-push@7e63fcaccd6d5c152e694dea32184a2ce0823cd7 # v1.0.1
+        with:
+          deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
+          required: "true"
       - name: Point the manifests at the released image and push
         run: |
           set -eu
@@ -362,6 +341,16 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           exit-code: "0"
+      - name: Gate on CRITICAL
+        # A CRITICAL finding with an available fix blocks the rollout (deploy-bump needs this job);
+        # unfixed ones are reported above but cannot be acted on yet.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ env.NEXT_VERSION }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
   semantic-release:
     # Runs before docker (see that job's comment) - the real tag/release must exist before
@@ -391,21 +380,9 @@ jobs:
       # get-version too: @semantic-release/git's verifyConditions runs `git push --dry-run`
       # even in dry-run mode. Same mechanism as lukislp/studylife's ci-cd.yml.
       - name: Push as the semantic-release deploy key (if configured)
-        env:
-          DEPLOY_KEY: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$DEPLOY_KEY" ]; then
-            echo "SEMANTIC_RELEASE_DEPLOY_KEY is not set - semantic-release pushes with GITHUB_TOKEN"
-            exit 0
-          fi
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/semantic_release
-          chmod 600 ~/.ssh/semantic_release
-          # github.com's published ed25519 host key, pinned instead of ssh-keyscan'd at runtime:
-          # https://docs.github.com/en/authentication/keychain/githubs-ssh-key-fingerprints
-          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
-          git remote set-url origin "git@github.com:${{ github.repository }}.git"
-          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/semantic_release -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+        uses: lukislp/ci-workflows/.github/actions/deploy-key-push@7e63fcaccd6d5c152e694dea32184a2ce0823cd7 # v1.0.1
+        with:
+          deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
