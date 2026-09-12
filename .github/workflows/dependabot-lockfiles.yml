@@ -32,6 +32,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
+          # Full history so the base branch's uv.lock is available locally (private repos
+          # cannot be fetched anonymously later, and the push token stays out of this step).
+          fetch-depth: 0
           persist-credentials: false
       - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -57,8 +60,7 @@ jobs:
         run: |
           # Dependabot's own uv.lock output has been unparsable, and `uv lock` refuses to start
           # from a broken file - so resolve from the base branch's lock plus the PR's pyproject.
-          git fetch --depth=1 origin "$BASE_REF"
-          git checkout FETCH_HEAD -- uv.lock
+          git show "origin/$BASE_REF:uv.lock" > uv.lock
           uv python install 3.12
           uv lock
       - if: env.HAS_TOKEN == 'true'
