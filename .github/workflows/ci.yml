@@ -260,6 +260,66 @@ jobs:
             "${{ env.IMAGE }}@${DIGEST}" --output text >/dev/null
           echo "signed and verified ${{ env.IMAGE }}@${DIGEST}" | tee -a "$GITHUB_STEP_SUMMARY"
 
+  # Image tag bump (2026-09-12): the deployment manifests pin the image by version, and this
+  # job - no longer Flux's image-automation-controller - writes the released version into them
+  # once the image exists, pushing over the same deploy key semantic-release uses. Flux then only
+  # reads this repo (its GitRepository carries no write token any more) and applies whatever the
+  # default branch says.
+  deploy-bump:
+    needs: [get-version, docker-manifest-merge]
+    if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: studylife-ai-release-chain
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      NEXT_VERSION: ${{ needs.get-version.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      # Same deploy-key push as the release jobs - the default branch only takes direct pushes
+      # from that key, so this job cannot fall back to GITHUB_TOKEN.
+      - name: Push as the semantic-release deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::SEMANTIC_RELEASE_DEPLOY_KEY is not set - the image tag bump cannot be pushed"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/semantic_release
+          chmod 600 ~/.ssh/semantic_release
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
+          git remote set-url origin git@github.com:lukislp/studylife-ai.git
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/semantic_release -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+      - name: Point the manifests at the released image and push
+        run: |
+          set -eu
+          for f in $(grep -rlE 'ghcr\.io/lukislp/(studylife-ai):' k8s --include='*.yaml' | grep -v '/flux/'); do
+            sed -i -E "s#(ghcr\.io/lukislp/(studylife-ai)):[0-9A-Za-z._-]+#\\1:${NEXT_VERSION}#g" "$f"
+          done
+          if git diff --quiet; then
+            echo "manifests already reference ${NEXT_VERSION}"
+            exit 0
+          fi
+          git diff --stat
+          git config user.name "studylife-ai-deploy"
+          git config user.email "deploy@studylife.local"
+          git commit -am "chore(deploy): image ${NEXT_VERSION} [skip ci]"
+          # The branch may have moved (an out-of-band push) between checkout and now - rebase, retry.
+          for attempt in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "::error::could not push the image tag bump"
+          exit 1
+
   trivy:
     needs: [get-version, docker-manifest-merge]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.get-version.outputs.published == 'true'
