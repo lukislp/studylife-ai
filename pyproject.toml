@@ -113,3 +113,9 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+
+[dependency-groups]
+# Fuzzing harness (fuzz/), Linux only - the atheris wheel does not exist for Windows.
+fuzz = [
+    "atheris>=2.3",
+]

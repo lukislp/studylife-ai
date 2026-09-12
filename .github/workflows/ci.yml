@@ -70,6 +70,19 @@ jobs:
   # own ci-cd.yml pattern: semantic-release drives the version, Flux picks
   # up the resulting GHCR tag via ImagePolicy - see docs/decisions.md).
   # ---------------------------------------------------------------------
+  # Coverage-guided fuzzing of the prompt-injection escaping and the request models (fuzz/):
+  # a short fixed budget per run, enough to catch a crash on the next code change.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.5.8"
+      - run: uv python install 3.12
+      - run: uv sync --frozen --group fuzz
+      - run: uv run python fuzz/fuzz_prompt_and_schemas.py -max_total_time=30 -rss_limit_mb=1024
+
   get-version:
     needs: [lint, test]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
