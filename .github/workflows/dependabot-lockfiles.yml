@@ -1,16 +1,9 @@
 name: Dependabot lock files
 
-# Dependabot regenerates the lock file of the project whose manifest it bumped, but not the
-# lock files of the projects that depend on it (NuGet records a reference's dependencies in
-# the referencing project's packages.lock.json) - and its uv lock output has shipped unparsable
-# files. Locked-mode restores then fail on the PR. This job runs on Dependabot's own PRs,
-# regenerates every lock file with the same tool versions CI uses and pushes the result back
-# onto the PR branch, after which the normal CI run and the auto-merge proceed.
-#
-# Deliberately a plain pull_request run (no pull_request_target): the PR's own restore runs in
-# the untrusted context with a read-only GITHUB_TOKEN, and the only credential involved - the
-# push token - is a Dependabot secret, which GitHub exposes solely to runs Dependabot triggered
-# and only to the single step that pushes. Nothing from the PR ever sees it.
+# Thin caller of the shared implementation in lukislp/ci-workflows: regenerates the lock files
+# on Dependabot's own PRs with the CI tool versions and pushes them back onto the PR branch.
+# Plain pull_request on purpose (never pull_request_target); AUTOMERGE_TOKEN is stored as a
+# Dependabot secret, which only Dependabot-triggered runs can read.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -19,62 +12,9 @@ permissions:
   contents: read
 
 jobs:
-  refresh:
-    if: github.actor == 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    env:
-      HAS_TOKEN: ${{ secrets.AUTOMERGE_TOKEN != '' }}
-      HEAD_REF: ${{ github.head_ref }}
-    steps:
-      - if: env.HAS_TOKEN != 'true'
-        run: echo "AUTOMERGE_TOKEN is not set as a Dependabot secret - lock files are not refreshed automatically"
-      - if: env.HAS_TOKEN == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
-          # Full history so the base branch's uv.lock is available locally (private repos
-          # cannot be fetched anonymously later, and the push token stays out of this step).
-          fetch-depth: 0
-          persist-credentials: false
-      - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          dotnet-version: "10.0.x"
-      - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
-        name: Regenerate every packages.lock.json
-        run: |
-          set -eu
-          for lock in $(git ls-files '**/packages.lock.json' 'packages.lock.json'); do
-            proj="$(ls "$(dirname "$lock")"/*.csproj | head -1)"
-            echo "restoring $proj"
-            dotnet restore "$proj" --force-evaluate -p:RestoreLockedMode=false
-          done
-      - if: env.HAS_TOKEN == 'true' && hashFiles('uv.lock') != ''
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.5.8"
-      - if: env.HAS_TOKEN == 'true' && hashFiles('uv.lock') != ''
-        name: Regenerate uv.lock
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          # Dependabot's own uv.lock output has been unparsable, and `uv lock` refuses to start
-          # from a broken file - so resolve from the base branch's lock plus the PR's pyproject.
-          git show "origin/$BASE_REF:uv.lock" > uv.lock
-          uv python install 3.12
-          uv lock
-      - if: env.HAS_TOKEN == 'true'
-        name: Push the refreshed lock files back onto the PR
-        env:
-          PUSH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-        run: |
-          # Only tracked files change here (the lock files); untracked build output stays out.
-          git add -u
-          if git diff --cached --quiet; then
-            echo "lock files already consistent"
-            exit 0
-          fi
-          git config user.name "lukislp"
-          git config user.email "koerber.lukas@t-online.de"
-          git commit -m "chore(deps): refresh the lock files after the Dependabot update"
-          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${HEAD_REF}"
+  lockfiles:
+    uses: lukislp/ci-workflows/.github/workflows/dependabot-lockfiles.yml@7e63fcaccd6d5c152e694dea32184a2ce0823cd7 # v1.0.1
+    with:
+      uv-version: "0.5.8"
+    secrets:
+      AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
