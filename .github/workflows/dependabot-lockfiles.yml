@@ -68,7 +68,8 @@ jobs:
         env:
           PUSH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
         run: |
-          git add -A -- '**/packages.lock.json' 'packages.lock.json' uv.lock 2>/dev/null || true
+          # Only tracked files change here (the lock files); untracked build output stays out.
+          git add -u
           if git diff --cached --quiet; then
             echo "lock files already consistent"
             exit 0
