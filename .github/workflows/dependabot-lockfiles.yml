@@ -52,7 +52,13 @@ jobs:
           version: "0.5.8"
       - if: env.HAS_TOKEN == 'true' && hashFiles('uv.lock') != ''
         name: Regenerate uv.lock
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          # Dependabot's own uv.lock output has been unparsable, and `uv lock` refuses to start
+          # from a broken file - so resolve from the base branch's lock plus the PR's pyproject.
+          git fetch --depth=1 origin "$BASE_REF"
+          git checkout FETCH_HEAD -- uv.lock
           uv python install 3.12
           uv lock
       - if: env.HAS_TOKEN == 'true'
