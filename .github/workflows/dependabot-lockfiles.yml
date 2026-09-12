@@ -1,0 +1,65 @@
+name: Dependabot lock files
+
+# Dependabot regenerates the lock file of the project whose manifest it bumped, but not the
+# lock files of the projects that depend on it (NuGet records a reference's dependencies in
+# the referencing project's packages.lock.json) - and its uv lock output has shipped unparsable
+# files. Locked-mode restores then fail on the PR. This job runs on Dependabot's own PRs,
+# regenerates every lock file with the same tool versions CI uses and pushes the result back
+# onto the PR branch, after which the normal CI run and the auto-merge proceed. It runs on
+# pull_request_target so the push token is available; only manifests and lock files change in
+# a Dependabot PR, and nothing from the PR is executed beyond the package restore itself.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.AUTOMERGE_TOKEN != '' }}
+    steps:
+      - if: env.HAS_TOKEN != 'true'
+        run: echo "AUTOMERGE_TOKEN is not set - lock files are not refreshed automatically"
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.AUTOMERGE_TOKEN }}
+      - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - if: env.HAS_TOKEN == 'true' && hashFiles('**/packages.lock.json') != ''
+        name: Regenerate every packages.lock.json
+        run: |
+          set -eu
+          for lock in $(git ls-files '**/packages.lock.json' 'packages.lock.json'); do
+            proj="$(ls "$(dirname "$lock")"/*.csproj | head -1)"
+            echo "restoring $proj"
+            dotnet restore "$proj" --force-evaluate -p:RestoreLockedMode=false
+          done
+      - if: env.HAS_TOKEN == 'true' && hashFiles('uv.lock') != ''
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.5.8"
+      - if: env.HAS_TOKEN == 'true' && hashFiles('uv.lock') != ''
+        name: Regenerate uv.lock
+        run: |
+          uv python install 3.12
+          uv lock
+      - if: env.HAS_TOKEN == 'true'
+        name: Push the refreshed lock files back onto the PR
+        run: |
+          git add -A -- '**/packages.lock.json' 'packages.lock.json' uv.lock 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "lock files already consistent"
+            exit 0
+          fi
+          git config user.name "lukislp"
+          git config user.email "koerber.lukas@t-online.de"
+          git commit -m "chore(deps): refresh the lock files after the Dependabot update"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
