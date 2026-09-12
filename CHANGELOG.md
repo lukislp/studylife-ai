@@ -1,3 +1,10 @@
+## [1.16.15](https://github.com/lukislp/studylife-ai/compare/v1.16.14...v1.16.15) (2026-09-12)
+
+
+### Bug Fixes
+
+* **ci:** bump the deployment image tag from the pipeline instead of Flux ([#47](https://github.com/lukislp/studylife-ai/issues/47)) ([ed48381](https://github.com/lukislp/studylife-ai/commit/ed483819f39c1aacb0cc5ec108378235a3330bf0))
+
 ## [1.16.14](https://github.com/lukislp/studylife-ai/compare/v1.16.13...v1.16.14) (2026-09-11)
 
 
