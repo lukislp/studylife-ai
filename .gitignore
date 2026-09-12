@@ -36,3 +36,8 @@ agent_checkpoints.db*
 
 # M4.5: local SQLite store of registered per-user AiApiKeys
 registered_keys.db*
+
+# libFuzzer crash artifacts written by fuzz/ harnesses
+crash-*
+leak-*
+timeout-*
