@@ -1,3 +1,10 @@
+## [1.16.17](https://github.com/lukislp/studylife-ai/compare/v1.16.16...v1.16.17) (2026-09-12)
+
+
+### Bug Fixes
+
+* **deps:** bump litellm from 1.99.0 to 1.100.0 ([f7a69c4](https://github.com/lukislp/studylife-ai/commit/f7a69c4affd0d5d08d9937f075d628ebb437e756))
+
 ## [1.16.16](https://github.com/lukislp/studylife-ai/compare/v1.16.15...v1.16.16) (2026-09-12)
 
 
