@@ -34,6 +34,7 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -48,6 +49,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -74,6 +76,7 @@ jobs:
   # a short fixed budget per run, enough to catch a crash on the next code change.
   fuzz:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -87,6 +90,7 @@ jobs:
     needs: [lint, test]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # @semantic-release/github's verifyConditions step checks the token has repo push access
     # (contents: write) even during a dry run - a read-only token fails that check outright.
     # issues:write/pull-requests:write are NOT needed here: those only get exercised by the
@@ -169,6 +173,7 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -226,6 +231,7 @@ jobs:
     needs: [get-version, docker]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -282,6 +288,7 @@ jobs:
     needs: [get-version, docker-manifest-merge]
     if: github.event_name == 'push' && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     concurrency:
       group: studylife-ai-release-chain
       cancel-in-progress: false
@@ -337,6 +344,7 @@ jobs:
     needs: [get-version, docker-manifest-merge]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
@@ -361,6 +369,7 @@ jobs:
     needs: [get-version]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.get-version.outputs.published == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       issues: write
