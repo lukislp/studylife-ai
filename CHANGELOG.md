@@ -1,3 +1,10 @@
+## [1.16.22](https://github.com/lukislp/studylife-ai/compare/v1.16.21...v1.16.22) (2026-09-13)
+
+
+### Bug Fixes
+
+* **k8s:** give probes a 5s timeout so load spikes stop killing pods ([#67](https://github.com/lukislp/studylife-ai/issues/67)) ([7ec3793](https://github.com/lukislp/studylife-ai/commit/7ec3793ba56008f4c54738344dfbeb3b0952b66c))
+
 ## [1.16.21](https://github.com/lukislp/studylife-ai/compare/v1.16.20...v1.16.21) (2026-09-13)
 
 
