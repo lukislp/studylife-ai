@@ -1,3 +1,10 @@
+## [1.16.21](https://github.com/lukislp/studylife-ai/compare/v1.16.20...v1.16.21) (2026-09-13)
+
+
+### Bug Fixes
+
+* **k8s:** read-only root filesystem for studylife-ai ([#66](https://github.com/lukislp/studylife-ai/issues/66)) ([6952bf0](https://github.com/lukislp/studylife-ai/commit/6952bf0c0135ff9335f53e4654e02c9c935c3932))
+
 ## [1.16.20](https://github.com/lukislp/studylife-ai/compare/v1.16.19...v1.16.20) (2026-09-13)
 
 
