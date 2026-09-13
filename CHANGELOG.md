@@ -1,3 +1,10 @@
+## [1.16.20](https://github.com/lukislp/studylife-ai/compare/v1.16.19...v1.16.20) (2026-09-13)
+
+
+### Bug Fixes
+
+* **k8s:** close the open egress hole in this namespace ([#65](https://github.com/lukislp/studylife-ai/issues/65)) ([b7f4326](https://github.com/lukislp/studylife-ai/commit/b7f432631f59225cdee3b0dca6b0f46a73f566a4))
+
 ## [1.16.19](https://github.com/lukislp/studylife-ai/compare/v1.16.18...v1.16.19) (2026-09-13)
 
 
