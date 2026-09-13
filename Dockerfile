@@ -7,6 +7,13 @@ FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Pull in Debian's security updates on every build: the digest-pinned base image lags behind
+# the security archive (three fixed CRITICAL perl-base CVEs - CVE-2026-13221, CVE-2026-42496,
+# CVE-2026-8376 - would block the release chain's Trivy gate) and a rebuild is cheaper than
+# waiting for the next python:3.12-slim digest. HTTPS mirror because plain-http port 80 is
+# blocked on some build hosts.
+RUN sed -i 's#http://deb.debian.org#https://deb.debian.org#' /etc/apt/sources.list.d/debian.sources     && apt-get update     && apt-get -y --no-install-recommends upgrade     && apt-get clean     && rm -rf /var/lib/apt/lists/*
+
 COPY --from=uv /uv /uvx /usr/local/bin/
 
 WORKDIR /app
