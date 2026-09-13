@@ -1,8 +1,9 @@
-# Same strategy as studylife's own k8s/12-network-policies.yaml: default-deny ingress as a
-# baseline, egress stays open (LiteLLM needs to reach whichever API provider is configured,
-# without a fixed allowlist). Bootstrap-only, NOT Flux-managed - same RBAC reasoning as
-# k8s/00-namespace.yaml/k8s/02-secret.yaml (kustomize-controller's ClusterRole has no
-# "networkpolicies" permission).
+# Default-deny in BOTH directions as the baseline (default-deny-ingress and
+# default-deny-egress), with every allowed flow spelled out as its own policy: cluster DNS in
+# allow-dns, the app pod's three outbound dependencies in studylife-ai-egress (Qdrant,
+# StudyLife, the LLM provider over HTTPS), and the inbound paths below. Bootstrap-only, NOT
+# Flux-managed - same RBAC reasoning as k8s/00-namespace.yaml/k8s/02-secret.yaml
+# (kustomize-controller's ClusterRole has no "networkpolicies" permission).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -26,7 +27,6 @@ spec:
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
-    - {} # egress otherwise unrestricted - this policy only adds an explicit DNS allowance
 ---
 # studylife-scale has no default-deny egress (see that namespace's own k8s/12-network-
 # policies.yaml header comment), so studylife-web can already reach out cross-namespace by
@@ -156,3 +156,22 @@ spec:
         - ipBlock: { cidr: 0.0.0.0/0 }
       ports:
         - { protocol: TCP, port: 443 }
+---
+# Egress counterpart of the ingress baseline above: a pod in this namespace gets no outbound
+# access at all beyond what an explicit policy grants it (allow-dns for cluster DNS, plus the
+# per-app egress policy in this file). Until 2026-09-13 allow-dns carried a bare "- {}" rule
+# next to its DNS rule, which allowed egress to anywhere - the internet, every other namespace
+# and the node network - making the policy a no-op in practice. This baseline replaces it, so
+# a pod added here later is denied by default instead of inheriting that hole.
+#
+# The Qdrant pod deliberately gets no egress policy of its own: it only answers requests and
+# writes to its PVC. The single outbound call it would otherwise make is its optional
+# anonymous usage telemetry, which nothing here depends on.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: studylife-ai
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
