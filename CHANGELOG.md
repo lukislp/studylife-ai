@@ -1,3 +1,10 @@
+## [1.16.18](https://github.com/lukislp/studylife-ai/compare/v1.16.17...v1.16.18) (2026-09-13)
+
+
+### Bug Fixes
+
+* **docker:** apply Debian security updates at build time ([#63](https://github.com/lukislp/studylife-ai/issues/63)) ([5201121](https://github.com/lukislp/studylife-ai/commit/5201121e3badfe2d11b650ceb963cc3d292334a9)), closes [github-dashboard#3](https://github.com/github-dashboard/issues/3)
+
 ## [1.16.17](https://github.com/lukislp/studylife-ai/compare/v1.16.16...v1.16.17) (2026-09-12)
 
 
