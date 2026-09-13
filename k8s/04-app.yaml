@@ -78,14 +78,23 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 200Mi}
             limits: {cpu: 500m, memory: 512Mi}
+          # Both probes set timeoutSeconds explicitly. The Kubernetes default of 1s is too
+          # tight for the arm64 Raspberry Pi nodes this runs on: the weakest node sits close
+          # to its memory limit, so an ordinary load spike pushes /health past one second,
+          # the liveness probe fails failureThreshold times in a row and kubelet restarts a
+          # container that was only busy.
           readinessProbe:
             httpGet: {path: /health, port: 8000}
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet: {path: /health, port: 8000}
             initialDelaySeconds: 20
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
           volumeMounts:
             - name: data
               mountPath: /app/data
