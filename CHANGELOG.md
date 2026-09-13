@@ -1,3 +1,10 @@
+## [1.16.19](https://github.com/lukislp/studylife-ai/compare/v1.16.18...v1.16.19) (2026-09-13)
+
+
+### Bug Fixes
+
+* **k8s:** add explicit egress policy for the app pod ([#64](https://github.com/lukislp/studylife-ai/issues/64)) ([be0e2cd](https://github.com/lukislp/studylife-ai/commit/be0e2cd27b235744da278fb232fcef6016b67902))
+
 ## [1.16.18](https://github.com/lukislp/studylife-ai/compare/v1.16.17...v1.16.18) (2026-09-13)
 
 
