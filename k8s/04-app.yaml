@@ -56,6 +56,10 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
+            # The two SQLite files on the PVC below are the only persisted state; the image
+            # layer is never written to. The two emptyDirs cover what the Python stack still
+            # needs to write (see volumeMounts).
+            readOnlyRootFilesystem: true
           envFrom:
             - configMapRef: {name: studylife-ai-config}
             - secretRef: {name: studylife-ai-secrets}
@@ -88,9 +92,22 @@ spec:
             - name: studylife-ca
               mountPath: /etc/studylife-ca
               readOnly: true
+            # Python's tempfile module, and tiktoken's BPE download cache, which defaults to
+            # a directory under gettempdir() unless TIKTOKEN_CACHE_DIR says otherwise.
+            - name: tmp
+              mountPath: /tmp
+            # $HOME of appuser: the default XDG cache location, where the LLM client stack
+            # (litellm/langchain tokenizer data) puts anything it caches on first use. Nothing
+            # in there has to survive a restart.
+            - name: home
+              mountPath: /home/appuser
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: studylife-ai-data}
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}
+        - name: home
+          emptyDir: {sizeLimit: 128Mi}
         - name: studylife-ca
           configMap: {name: studylife-internal-ca}
 ---
