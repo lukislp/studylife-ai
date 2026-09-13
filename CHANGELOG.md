@@ -1,3 +1,10 @@
+## [1.16.23](https://github.com/lukislp/studylife-ai/compare/v1.16.22...v1.16.23) (2026-09-13)
+
+
+### Bug Fixes
+
+* **k8s:** seal studylife-ai-secrets so it survives a cluster rebuild ([#68](https://github.com/lukislp/studylife-ai/issues/68)) ([a523d95](https://github.com/lukislp/studylife-ai/commit/a523d959de64a0b6873558ffd52c15116a71c393))
+
 ## [1.16.22](https://github.com/lukislp/studylife-ai/compare/v1.16.21...v1.16.22) (2026-09-13)
 
 
