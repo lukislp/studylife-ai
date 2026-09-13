@@ -112,3 +112,47 @@ spec:
         - podSelector: { matchLabels: { app: studylife-ai } }
       ports:
         - { protocol: TCP, port: 6333 }
+---
+# Egress for the app pod. Three outbound dependencies, all of them load-bearing:
+#
+#  1. Qdrant in this same namespace (QDRANT_URL = http://qdrant:6333, k8s/01-config.yaml) -
+#     every ingestion write and every RAG retrieval goes here (ingestion/qdrant_store.py).
+#  2. StudyLife itself (STUDYLIFE_API_BASE_URL =
+#     https://studylife-web.studylife-scale.svc.cluster.local) - the periodic sync job
+#     (ingestion/sync.py, visible in this pod's logs as "Sync[note]/[course]/[session]...")
+#     and the agent's tool calls (api/agent.py). NetworkPolicy matches the POD port, not the
+#     Service port: studylife-scale's studylife-web Service maps 443 -> 8443 and 80 -> 8080,
+#     so the HTTPS base URL above lands on container port 8443. 8080 is allowed alongside it
+#     so switching the base URL to plain HTTP needs no further policy change.
+#  3. Outbound HTTPS to the configured LLM provider. LLM_MODEL/RERANK_MODEL/EMBEDDING_MODEL
+#     are all "openai/..." with an empty LLM_API_BASE, i.e. LiteLLM talks to the provider's
+#     public API over 443 (llm/client.py, agent/graph.py). The provider is configuration, not
+#     a fixed host - enumerating its IPs would break on the next DNS change, so this stays a
+#     0.0.0.0/0:443 allowance, the same trade-off claude-queue's api-egress makes.
+#
+# Deliberately NOT allowed: everything else, including the Kubernetes API (this app never
+# talks to it) and any non-443 outbound port. DNS is covered by allow-dns above; kubelet
+# probes are not subject to NetworkPolicy (they originate from the node, not a pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: studylife-ai-egress
+  namespace: studylife-ai
+spec:
+  podSelector: { matchLabels: { app: studylife-ai } }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: qdrant } }
+      ports:
+        - { protocol: TCP, port: 6333 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: studylife-scale } }
+          podSelector: { matchLabels: { app: studylife-web } }
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8443 }
+    - to:
+        - ipBlock: { cidr: 0.0.0.0/0 }
+      ports:
+        - { protocol: TCP, port: 443 }
