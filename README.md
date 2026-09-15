@@ -13,7 +13,7 @@ A standalone Python microservice that adds an LLM agent to [StudyLife](https://g
 - **Capture enrichment** — course matching, tags, a summary, and related-notes suggestions for notes saved via the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension (see [Capture enrichment](#capture-enrichment)).
 - **Evaluation** — a RAGAS-based eval pipeline (faithfulness, answer relevancy, context precision) running in CI.
 
-This is a learning project and portfolio piece; design decisions and trade-offs are logged in [docs/decisions.md](docs/decisions.md).
+Design decisions and the trade-offs behind them are logged in [docs/decisions.md](docs/decisions.md).
 
 ## Status: M1–M6 done
 
