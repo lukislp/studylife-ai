@@ -1,3 +1,11 @@
+## [1.16.25](https://github.com/lukislp/studylife-ai/compare/v1.16.24...v1.16.25) (2026-09-17)
+
+
+### Bug Fixes
+
+* **deps:** bump langchain from 1.3.18 to 1.4.0 ([3222e81](https://github.com/lukislp/studylife-ai/commit/3222e81b5188f9b68c9ef173fae5153338b60841))
+* **deps:** bump litellm from 1.99.0 to 1.100.1 ([dbf0bf3](https://github.com/lukislp/studylife-ai/commit/dbf0bf3945ccc538982bd4947619e48f95a3c4dd))
+
 ## [1.16.24](https://github.com/lukislp/studylife-ai/compare/v1.16.23...v1.16.24) (2026-09-17)
 
 
