@@ -1,3 +1,11 @@
+## [1.16.24](https://github.com/lukislp/studylife-ai/compare/v1.16.23...v1.16.24) (2026-09-17)
+
+
+### Bug Fixes
+
+* **ci:** bump astral-sh/setup-uv from 10.0.1 to 10.1.0 ([a554fb7](https://github.com/lukislp/studylife-ai/commit/a554fb741d1841c0a338b165427b6dba67333a24))
+* **docker:** bump astral-sh/uv from 0.12.13 to 0.12.15 ([7693fd3](https://github.com/lukislp/studylife-ai/commit/7693fd3c16da16bfe1d0f36fa0f978294528fe40))
+
 ## [1.16.23](https://github.com/lukislp/studylife-ai/compare/v1.16.22...v1.16.23) (2026-09-13)
 
 
