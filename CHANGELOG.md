@@ -1,3 +1,10 @@
+## [1.16.26](https://github.com/lukislp/studylife-ai/compare/v1.16.25...v1.16.26) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ci:** add Harden Runner in audit mode to every job ([#91](https://github.com/lukislp/studylife-ai/issues/91)) ([51a653b](https://github.com/lukislp/studylife-ai/commit/51a653b498324931f78a66bde8d4bf851c65fff6))
+
 ## [1.16.25](https://github.com/lukislp/studylife-ai/compare/v1.16.24...v1.16.25) (2026-09-17)
 
 
