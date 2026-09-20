@@ -1,3 +1,10 @@
+## [1.16.27](https://github.com/lukislp/studylife-ai/compare/v1.16.26...v1.16.27) (2026-09-20)
+
+
+### Bug Fixes
+
+* **ci:** add Harden Runner in audit mode to the eval workflow ([#92](https://github.com/lukislp/studylife-ai/issues/92)) ([7c38f80](https://github.com/lukislp/studylife-ai/commit/7c38f80cad7f043cbe4bd563cf99045092189be3))
+
 ## [1.16.26](https://github.com/lukislp/studylife-ai/compare/v1.16.25...v1.16.26) (2026-09-20)
 
 
