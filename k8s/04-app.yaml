@@ -52,7 +52,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-ai
-          image: ghcr.io/lukislp/studylife-ai:1.16.37 # set by the deploy-bump job (CI) on every release
+          image: ghcr.io/lukislp/studylife-ai:1.16.38 # set by the deploy-bump job (CI) on every release
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
