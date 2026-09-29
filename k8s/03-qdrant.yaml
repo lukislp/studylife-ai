@@ -3,12 +3,12 @@
 # justifies Qdrant's own clustering mode. /livez and /readyz confirmed live against the real
 # image (docker-compose's local Qdrant, both 200 OK) - not guessed from docs.
 #
-# No runAsNonRoot/runAsUser: checked live (docker run --entrypoint sh qdrant/qdrant:latest -c
-# id) - the official image runs as root with no alternate non-root user or writable-by-non-root
-# /qdrant directory built in, unlike studylife's own aspnet-based image. Forcing a non-root UID
-# here would need an initContainer to chown the PVC first - not worth the added complexity for
-# a vendored image with no non-root support, and studylife-ai's namespace only hard-enforces the
-# "baseline" Pod Security Standard (allows root), same as studylife-scale.
+# The official image defaults to root (checked live: docker run --entrypoint sh
+# qdrant/qdrant:latest -c id), but the Deployment below runs it as uid 1000 regardless: the
+# process only needs /qdrant/storage writable, and the pod-level fsGroup guarantees that
+# (Kubernetes sets the volume's group ownership on mount). No container in the pod runs as
+# root, which is what lets studylife-ai's namespace hard-enforce the "restricted" Pod
+# Security Standard.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -45,19 +45,15 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
+        # fsGroup replaced the former root chown init container: the kubelet sets
+        # group ownership on the volume at mount time, and OnRootMismatch skips the
+        # recursive walk whenever the volume root already matches (it does - the
+        # data has been 1000:1000 since the init-container era). With the last root
+        # container gone, the namespace enforces the "restricted" Pod Security
+        # Standard (00-namespace.yaml).
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile: { type: RuntimeDefault }
-      initContainers:
-        # The PVC's collections were written by the root era; chown on every
-        # start - idempotent - so the non-root qdrant below keeps writing
-        # them. The only root in the pod.
-        - name: fix-storage-ownership
-          image: busybox:1.38.0
-          command: ["chown", "-R", "1000:1000", "/qdrant/storage"]
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: storage
-              mountPath: /qdrant/storage
       containers:
         - name: qdrant
           # Pinned to the exact version that was running as :latest (digest-
