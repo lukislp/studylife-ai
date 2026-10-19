@@ -256,7 +256,7 @@ jobs:
         with:
           deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@a25bdb7dd0f0b5451be885fc664fc4b46d572067 # v1.7.29
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@b27ffa9b31b66e8cd301c8188371a35ac95c67d8 # v1.7.38
         with:
           dry-run: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -362,7 +362,7 @@ jobs:
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: digests-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -653,7 +653,7 @@ jobs:
         with:
           deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@a25bdb7dd0f0b5451be885fc664fc4b46d572067 # v1.7.29
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@b27ffa9b31b66e8cd301c8188371a35ac95c67d8 # v1.7.38
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
@@ -673,6 +673,6 @@ jobs:
           fi
           git checkout -B main origin/main
       - if: steps.semrel.outcome == 'failure'
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@a25bdb7dd0f0b5451be885fc664fc4b46d572067 # v1.7.29
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@b27ffa9b31b66e8cd301c8188371a35ac95c67d8 # v1.7.38
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
