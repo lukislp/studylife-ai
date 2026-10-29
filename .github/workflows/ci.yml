@@ -256,7 +256,7 @@ jobs:
         with:
           deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@6f4cdb006224918fd40221eeb54e3d4216f816f9 # v1.8.11
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@bcb2de45ddf2d2dfc73b206998344af75b0a30b3 # v1.8.13
         with:
           dry-run: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -329,7 +329,7 @@ jobs:
         with:
           ref: main
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -416,7 +416,7 @@ jobs:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -569,7 +569,7 @@ jobs:
             run-actions-*.actions.githubusercontent.com:443
             timestamp.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -653,7 +653,7 @@ jobs:
         with:
           deploy-key: ${{ secrets.SEMANTIC_RELEASE_DEPLOY_KEY }}
       - id: semrel
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@6f4cdb006224918fd40221eeb54e3d4216f816f9 # v1.8.11
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@bcb2de45ddf2d2dfc73b206998344af75b0a30b3 # v1.8.13
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
@@ -673,6 +673,6 @@ jobs:
           fi
           git checkout -B main origin/main
       - if: steps.semrel.outcome == 'failure'
-        uses: lukislp/ci-workflows/.github/actions/semantic-release@6f4cdb006224918fd40221eeb54e3d4216f816f9 # v1.8.11
+        uses: lukislp/ci-workflows/.github/actions/semantic-release@bcb2de45ddf2d2dfc73b206998344af75b0a30b3 # v1.8.13
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
