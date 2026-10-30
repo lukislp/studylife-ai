@@ -46,6 +46,11 @@ dependencies = [
 ]
 
 [tool.uv]
+# litellm caps filelock below 4.0 (since 1.106), but the fixes for GHSA-567q-5qvw-pf92,
+# GHSA-9vhv-jxww-xfm5 and GHSA-v4x8-3wr5-3wq8 exist only in filelock 4.2.1+. litellm only takes a
+# FileLock in its proxy CLI and huggingface-hub uses FileLock/SoftFileLock, whose API 4.x keeps
+# (4.0 breaks only SoftReadWriteLock). Drop this once litellm allows filelock 4.
+override-dependencies = ["filelock>=4.2.1"]
 dev-dependencies = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
