@@ -50,6 +50,10 @@ spec:
           podSelector: { matchLabels: { app: studylife-web } }
       ports:
         - { protocol: TCP, port: 8000 }
+        # HTTPS listener for the same routes (tls.py, TLS_PORT) - the port StudyLife's
+        # StudyLifeAi__BaseUrl uses once it calls over TLS. 8000 stays allowed until that
+        # switch is live everywhere and can be dropped afterwards.
+        - { protocol: TCP, port: 8443 }
 ---
 # Metrics dashboard (see docs/decisions.md "Metrics dashboard"): studylife's own Prometheus
 # (studylife repo's k8s/14-prometheus.yaml, "studylife-ai" scrape job) lives in a different
@@ -98,6 +102,8 @@ spec:
           podSelector: { matchLabels: { app: studylife-worker } }
       ports:
         - { protocol: TCP, port: 8001 }
+        # HTTPS listener for /internal/* (tls.py, INTERNAL_API_TLS_PORT), see above.
+        - { protocol: TCP, port: 8444 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

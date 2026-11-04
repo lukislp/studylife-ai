@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -23,6 +24,13 @@ from studylife_ai.internal_server import (
 )
 from studylife_ai.llm.logging import configure_llm_usage_logging
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
+from studylife_ai.tls import (
+    build_tls_server,
+    start_tls_server,
+    stop_tls_servers,
+    tls_files,
+    watch_certificates,
+)
 
 
 def _require_metrics_token(request: Request) -> None:
@@ -93,9 +101,36 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         internal_server = build_internal_server(internal_app, settings)
         internal_server_task = asyncio.create_task(serve_internal_app(internal_server))
 
+        # HTTPS listeners for the StudyLife -> studylife-ai hop (tls.py): the same two apps
+        # again, on TLS_PORT and INTERNAL_API_TLS_PORT, only when TLS_CERT_FILE/TLS_KEY_FILE
+        # are set. A failure here raises, so uvicorn exits instead of running without them.
+        tls_servers: list[uvicorn.Server] = []
+        tls_tasks: list[asyncio.Task[None]] = []
+        cert_watch_task: asyncio.Task[None] | None = None
         try:
+            files = tls_files(settings.tls_cert_file, settings.tls_key_file)
+            if files is not None:
+                tls_servers = [
+                    build_tls_server(app, settings.tls_port, files, log_level=settings.log_level),
+                    build_tls_server(
+                        internal_app,
+                        settings.internal_api_tls_port,
+                        files,
+                        log_level=settings.log_level,
+                    ),
+                ]
+                for server in tls_servers:
+                    tls_tasks.append(await start_tls_server(server))
+                cert_watch_task = asyncio.create_task(
+                    watch_certificates(tls_servers, files, settings.tls_reload_interval_seconds)
+                )
             yield
         finally:
+            if cert_watch_task is not None:
+                cert_watch_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await cert_watch_task
+            await stop_tls_servers(tls_servers, tls_tasks)
             if sync_task is not None:
                 sync_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

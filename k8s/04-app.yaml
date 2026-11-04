@@ -63,6 +63,16 @@ spec:
           envFrom:
             - configMapRef: {name: studylife-ai-config}
             - secretRef: {name: studylife-ai-secrets}
+          # HTTPS listeners for the StudyLife -> studylife-ai hop (src/studylife_ai/tls.py): the
+          # public routes on 8443 and /internal/* on 8444, with the cert-manager certificate from
+          # 07-tls-certificate.yaml. StudyLife calls these ports and validates the certificate
+          # against its internal CA. Removing these two variables is the explicit opt-out back to
+          # plain HTTP only.
+          env:
+            - name: TLS_CERT_FILE
+              value: /etc/studylife-ai-tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/studylife-ai-tls/tls.key
           ports:
             - containerPort: 8000
             # Audit O6-ai (2026-08-26, see docs/decisions.md "F15/O6-ai: chat model allowlist,
@@ -75,6 +85,11 @@ spec:
             # INTERNAL_API_PORT is ever overridden away from its default (8001) in
             # studylife-ai-config.
             - containerPort: 8001
+            # TLS_PORT / INTERNAL_API_TLS_PORT defaults (config.py): HTTPS for the same two apps.
+            # The plain ports above stay for the kubelet probes and Prometheus; StudyLife's
+            # backend only uses these two (its AddonTls:RequireHttps refuses http:// URLs).
+            - containerPort: 8443
+            - containerPort: 8444
           resources:
             requests: {cpu: 100m, memory: 200Mi}
             limits: {cpu: 500m, memory: 512Mi}
@@ -101,6 +116,9 @@ spec:
             - name: studylife-ca
               mountPath: /etc/studylife-ca
               readOnly: true
+            - name: tls
+              mountPath: /etc/studylife-ai-tls
+              readOnly: true
             # Python's tempfile module, and tiktoken's BPE download cache, which defaults to
             # a directory under gettempdir() unless TIKTOKEN_CACHE_DIR says otherwise.
             - name: tmp
@@ -119,6 +137,10 @@ spec:
           emptyDir: {sizeLimit: 128Mi}
         - name: studylife-ca
           configMap: {name: studylife-internal-ca}
+        # Written by cert-manager (07-tls-certificate.yaml). A Secret volume follows renewals,
+        # and tls.py reloads the files without a restart.
+        - name: tls
+          secret: {secretName: studylife-ai-tls}
 ---
 apiVersion: v1
 kind: Service
@@ -137,3 +159,11 @@ spec:
     - name: internal
       port: 8001
       targetPort: 8001
+    # HTTPS for the StudyLife -> studylife-ai hop (tls.py, 07-tls-certificate.yaml). StudyLife's
+    # StudyLifeAi__BaseUrl / __InternalBaseUrl point here.
+    - name: https
+      port: 8443
+      targetPort: 8443
+    - name: internal-https
+      port: 8444
+      targetPort: 8444

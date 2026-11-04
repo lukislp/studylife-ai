@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -286,6 +287,29 @@ class Settings(BaseSettings):
     # that path is actually hit) so StudyLife's backend keeps working unchanged regardless of
     # which port it's configured to call, or which side of the split deploys first.
     internal_api_port: int = 8001
+
+    # TLS for the StudyLife -> studylife-ai hop (see tls.py and README.md "TLS"). When both
+    # files are set, the process additionally serves the public routes over HTTPS on `tls_port`
+    # and /internal/* over HTTPS on `internal_api_tls_port`, with this PEM certificate/key pair
+    # (in the cluster: a cert-manager Certificate issued by StudyLife's internal CA, see
+    # k8s/04-app.yaml). Setting only one of the two is a startup error, and so is a file that
+    # cannot be loaded: the service never silently falls back to plain HTTP when TLS was asked
+    # for. The plain ports above stay up for the kubelet probes and Prometheus. The shipped k8s
+    # manifests set both files; leaving them unset is the explicit opt-out for local runs.
+    tls_cert_file: str | None = None
+    tls_key_file: str | None = None
+    tls_port: int = 8443
+    internal_api_tls_port: int = 8444
+    # How often (seconds) the certificate files are checked for a renewal. cert-manager rewrites
+    # the mounted Secret well before expiry; new TLS handshakes then use the new pair without a
+    # restart.
+    tls_reload_interval_seconds: float = 300.0
+
+    @model_validator(mode="after")
+    def _tls_files_set_together(self) -> "Settings":
+        if bool(self.tls_cert_file) != bool(self.tls_key_file):
+            raise ValueError("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+        return self
 
     # Capture enrichment (studylife-capture browser extension, see docs/decisions.md "Capture
     # enrichment"): cosine-similarity threshold (rag/enrichment.py's course vector search,
