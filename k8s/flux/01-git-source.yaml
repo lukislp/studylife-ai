@@ -1,5 +1,5 @@
 # Read access only (public repo): since 2026-09-12 the released image tag is written into the
-# manifests by the deploy-bump job of the CI pipeline (over the semantic-release deploy key), so
+# manifests by the deploy-bump job of the CI pipeline (over a deploy key), so
 # nothing in the cluster pushes to this repo any more and no token is referenced here.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
