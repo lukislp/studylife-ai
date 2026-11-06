@@ -391,9 +391,11 @@ jobs:
   # once the image exists, pushing over the SEMANTIC_RELEASE_DEPLOY_KEY deploy key. Flux then only
   # reads this repo (its GitRepository carries no write token any more) and applies whatever the
   # default branch says.
+  # The bump waits for the release job, so the tag lands first and the release is never
+  # skipped because the bump's own commit moved the default branch.
   deploy-bump:
-    needs: [get-version, docker-manifest-merge, trivy]
-    if: github.event_name == 'push' && needs.get-version.outputs.released == 'true'
+    needs: [get-version, release, docker-manifest-merge, trivy]
+    if: github.event_name == 'push' && needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -402,7 +404,7 @@ jobs:
     permissions:
       contents: read
     env:
-      NEXT_VERSION: ${{ needs.get-version.outputs.version }}
+      NEXT_VERSION: ${{ needs.release.outputs.version }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
