@@ -201,7 +201,7 @@ jobs:
 
   docker:
     # One native runner per platform instead of a single QEMU-emulated multi-platform build -
-    # ubuntu-24.04-arm is a real arm64 GitHub-hosted runner (free for public repos), so that
+    # ubuntu-26.04-arm is a real arm64 GitHub-hosted runner (free for public repos), so that
     # leg runs at native speed (same pattern as homelab-autodoc/UnifiProtectDashboard). Each
     # leg pushes by digest only; docker-manifest-merge below writes the actual
     # :latest/:$NEXT_VERSION tags. Runs after release (not before, see that job) -
@@ -218,7 +218,7 @@ jobs:
             runner: ubuntu-latest
           - arch: arm64
             platform: linux/arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
