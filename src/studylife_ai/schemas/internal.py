@@ -35,3 +35,21 @@ class EnrichCaptureResponse(BaseModel):
     tags: list[str]
     summary: str | None
     related_note_ids: list[int]
+
+
+class ProviderRole(BaseModel):
+    # What the model is used for: "chat", "embeddings", "rerank" or "date_parse".
+    role: str
+    # Human-readable provider label derived from the LiteLLM prefix ("OpenAI", "Ollama (local)");
+    # an unrecognised prefix is reported verbatim, a missing prefix as "unknown".
+    provider: str
+    model: str
+    # True only when the model runs on a host the operator controls (Ollama, or an explicitly
+    # configured local/private base URL). Unknown is reported as not local.
+    local: bool
+
+
+class ProviderInfoResponse(BaseModel):
+    roles: list[ProviderRole]
+    # True when at least one role sends data to an external provider.
+    any_external: bool
