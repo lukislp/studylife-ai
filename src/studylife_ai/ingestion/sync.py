@@ -346,7 +346,9 @@ async def purge_user(
     )
 
 
-async def sync_all(settings: Settings) -> None:
+async def sync_all(
+    settings: Settings, *, registered_keys: RegisteredKeyStore | None = None
+) -> None:
     """Syncs every registered StudyLife account (see docs/decisions.md
     "M4.5 Multi-user support") into its own Qdrant partition, one after
     another - not concurrently, since each user's own four-endpoint fetch is
@@ -357,14 +359,21 @@ async def sync_all(settings: Settings) -> None:
     logged and skipped rather than aborting the whole run - otherwise a
     single broken account would silently starve ingestion for every other
     registered user until fixed.
+
+    `registered_keys` is the caller's already-open store (the app's lifespan hands in its one
+    shared instance, so the periodic loop does not re-open the database and re-run the plaintext
+    migration every tick); it is left open for the caller to close. Without it (the
+    `python -m studylife_ai.ingestion` CLI) this opens - and closes - its own.
     """
     if not settings.studylife_api_base_url:
         raise RuntimeError("STUDYLIFE_API_BASE_URL must be set to run ingestion.")
 
     store = QdrantStore(url=settings.qdrant_url, collection=settings.qdrant_collection)
-    registered_keys = RegisteredKeyStore(
-        settings.registered_keys_db_path, settings.ai_key_encryption_key
-    )
+    owns_registered_keys = registered_keys is None
+    if registered_keys is None:
+        registered_keys = RegisteredKeyStore(
+            settings.registered_keys_db_path, settings.ai_key_encryption_key
+        )
     try:
         await registered_keys.setup()
         user_ids = await registered_keys.list_user_ids()
@@ -405,7 +414,8 @@ async def sync_all(settings: Settings) -> None:
                 await registered_keys.record_sync_success(user_id)
     finally:
         await store.close()
-        await registered_keys.close()
+        if owns_registered_keys:
+            await registered_keys.close()
 
 
 async def _handle_sync_401(

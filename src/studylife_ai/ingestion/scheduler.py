@@ -12,11 +12,12 @@ import logging
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.sync import sync_all
+from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
 
 
-async def run_periodic_sync(settings: Settings) -> None:
+async def run_periodic_sync(settings: Settings, registered_keys: RegisteredKeyStore) -> None:
     """Runs sync_all() every `ingestion_sync_interval_seconds`, forever, until
     the task is cancelled (see main.py's lifespan, which cancels it on
     shutdown). A RuntimeError from sync_all is the expected "not configured
@@ -25,10 +26,13 @@ async def run_periodic_sync(settings: Settings) -> None:
     the first user ever registers. Any other exception is logged with a full
     traceback but likewise never stops the loop - one bad tick shouldn't
     permanently end periodic syncing.
+
+    `registered_keys` is the app's one shared, already-set-up store: every tick reuses it
+    rather than opening the database (and re-running the plaintext-key migration) again.
     """
     while True:
         try:
-            await sync_all(settings)
+            await sync_all(settings, registered_keys=registered_keys)
         except RuntimeError as exc:
             logger.info("Periodic sync skipped: %s", exc)
         except Exception:
