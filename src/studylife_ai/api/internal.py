@@ -25,10 +25,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.sync import purge_user, sync_user
+from studylife_ai.llm.provider_info import describe_providers
 from studylife_ai.rag.enrichment import enrich_capture
 from studylife_ai.schemas.internal import (
     EnrichCaptureRequest,
     EnrichCaptureResponse,
+    ProviderInfoResponse,
     RegisterKeyRequest,
     RevokeKeyRequest,
 )
@@ -164,3 +166,13 @@ async def enrich_capture_endpoint(
         summary=result.summary,
         related_note_ids=result.related_note_ids,
     )
+
+
+@router.get("/internal/provider-info")
+async def provider_info(http_request: Request) -> ProviderInfoResponse:
+    """Which AI providers and models this instance sends user data to, derived from the
+    configured model names (llm/provider_info.py). StudyLife's backend reads it to decide
+    whether a user must give explicit consent first. Same auth as the other /internal routes;
+    reveals no secrets, only provider labels and model names."""
+    _require_valid_secret(http_request)
+    return describe_providers(get_settings())

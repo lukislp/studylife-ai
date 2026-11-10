@@ -821,6 +821,17 @@ All of the following were found live, against the real deployment, after M5 itse
 - **Verified (whole pass)**: full suite (400 tests, up from 385), `ruff check .`, `ruff format --check .`, and `mypy src` all clean.
 - **Not done**: no live verification against a real LLM provider's actual 429/5xx behavior (all retry/transient-classification tests use fakes raising `litellm.exceptions` instances directly, not a real flaky endpoint). No change to `agent/graph.py`'s `ChatLiteLLM` construction itself - Finding 2 was scoped to the four named call sites (see above). Work done on branch `fix/agent-injection-hardening`, not committed/pushed (per the task's instructions) - a human should review and commit.
 
+## Provider description endpoint
+
+### 2026-11-10 — `GET /internal/provider-info`: tell StudyLife which AI providers and models see user data **[owner: assistant]**
+
+- **Why**: StudyLife needs explicit user consent before notes and study data go to a third-party AI provider (Apple App Review guideline 5.1.2(i)). Only this service knows the provider: it is chosen by the operator through `LLM_MODEL`, `EMBEDDING_MODEL`, `RERANK_MODEL` and `DATE_PARSE_MODEL`, and nothing exposed it to StudyLife's backend, let alone its clients.
+- **Decision**: one pure function, `llm/provider_info.py::describe_providers`, derives the description from the configured LiteLLM model strings; one internal endpoint, `GET /internal/provider-info` (same `X-StudyLife-Shared-Secret` check as the other `/internal/*` routes, same dedicated port), returns it. For each configured role (chat, embeddings, rerank, date parsing; the optional two only when set) it reports a provider label, the model name and a `local` flag, plus an overall `any_external`. No change to ingestion, retrieval or chat behaviour.
+- **Labels**: the LiteLLM prefix is mapped through a small table (`openai` to "OpenAI", `anthropic` to "Anthropic", `ollama` to "Ollama (local)", ...). An unlisted prefix is reported verbatim rather than guessed; a model string without a prefix is reported as "unknown".
+- **`local`**: true for the prefixes that run on a host the operator controls (`ollama`, `ollama_chat`, `lm_studio`, `hosted_vllm`), and for any other known prefix when `LLM_API_BASE` points at loopback, a private or link-local address, a `.local` name or a single-label host (an OpenAI-compatible server on the operator's network). The base URL is only considered for chat, rerank and date parsing, because those are the calls that send `api_base`; embeddings never do. Unknown is not local: a model without a prefix is never reported local, so the consumer errs towards asking for consent.
+- **Alternatives rejected**: a `/health` extension (health is unauthenticated and must stay minimal); a public endpoint (the model names are operational detail, and consent is enforced by StudyLife's backend, which is the only caller); reporting the raw env values (would leak the base URL and any credentials embedded in it).
+- **Compatibility**: purely additive. StudyLife versions that do not call it are unaffected, and a StudyLife that calls it against an older service sees a 404 and must treat the provider as unknown.
+
 ## Dependency security advisories
 
 ### 2026-09-15 â€” Dependabot alerts #1 (`diskcache`) and #2 (`ragas`) dismissed as tolerable risk, not fixed **[owner: user]**
