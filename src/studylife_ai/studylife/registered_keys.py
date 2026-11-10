@@ -82,7 +82,9 @@ class RegisteredKeyStore:
         self._connection: aiosqlite.Connection | None = None
 
     async def setup(self) -> None:
-        """Idempotent - a second call is a no-op. Matters beyond tidiness:
+        """Idempotent - a second call is a no-op, so the plaintext migration below runs once per
+        store instance (the service keeps exactly one for its lifetime, see main.py's lifespan
+        and `ingestion.sync.sync_all`'s `registered_keys` parameter). Matters beyond tidiness:
         for a `:memory:` path (used by tests), reconnecting via
         `aiosqlite.connect()` again would silently open a brand new, empty
         database - in-memory SQLite databases aren't shared across
@@ -143,11 +145,16 @@ class RegisteredKeyStore:
                 migrated += 1
         if migrated:
             await self._conn.commit()
-        logger.info(
-            "RegisteredKeyStore migration: re-encrypted %d/%d legacy plaintext row(s)",
-            migrated,
-            len(rows),
-        )
+            logger.info(
+                "RegisteredKeyStore migration: re-encrypted %d/%d legacy plaintext row(s)",
+                migrated,
+                len(rows),
+            )
+        else:
+            logger.debug(
+                "RegisteredKeyStore migration: nothing to re-encrypt (%d row(s) checked)",
+                len(rows),
+            )
 
     @property
     def _conn(self) -> aiosqlite.Connection:

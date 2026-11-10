@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -418,3 +419,70 @@ async def test_construction_fails_when_any_comma_separated_entry_is_invalid(
             str(tmp_path / "registered_keys.db"),
             f"{TEST_AI_KEY_ENCRYPTION_KEY},not-a-valid-fernet-key",
         )
+
+
+_MIGRATION_LOGGER = "studylife_ai.studylife.registered_keys"
+
+
+def _seed_legacy_plaintext_row(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE registered_keys ("
+            "user_id TEXT PRIMARY KEY, ai_api_key TEXT NOT NULL, registered_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO registered_keys (user_id, ai_api_key, registered_at) "
+            "VALUES ('alice', 'legacy-plaintext-key', datetime('now'))"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def test_migration_logs_at_info_only_when_rows_were_reencrypted(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    db_path = tmp_path / "registered_keys.db"
+    _seed_legacy_plaintext_row(db_path)
+
+    with caplog.at_level(logging.DEBUG, logger=_MIGRATION_LOGGER):
+        store = RegisteredKeyStore(str(db_path), TEST_AI_KEY_ENCRYPTION_KEY)
+        await store.setup()
+    info = [r for r in caplog.records if r.levelno == logging.INFO and "migration" in r.message]
+    assert [r.message for r in info] == [
+        "RegisteredKeyStore migration: re-encrypted 1/1 legacy plaintext row(s)"
+    ]
+    assert await store.get("alice") == "legacy-plaintext-key"
+    await store.close()
+
+
+async def test_migration_with_nothing_to_do_logs_only_at_debug(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = await _store(tmp_path)
+    await store.set("alice", "key-a")
+    await store.close()
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=_MIGRATION_LOGGER):
+        store = RegisteredKeyStore(str(tmp_path / "registered_keys.db"), TEST_AI_KEY_ENCRYPTION_KEY)
+        await store.setup()
+    migration = [r for r in caplog.records if "migration" in r.message]
+    assert [r.levelno for r in migration] == [logging.DEBUG]
+    await store.close()
+
+
+async def test_repeated_setup_scans_for_legacy_rows_only_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    db_path = tmp_path / "registered_keys.db"
+    _seed_legacy_plaintext_row(db_path)
+    store = RegisteredKeyStore(str(db_path), TEST_AI_KEY_ENCRYPTION_KEY)
+
+    with caplog.at_level(logging.DEBUG, logger=_MIGRATION_LOGGER):
+        await store.setup()
+        await store.setup()
+        await store.setup()
+    assert len([r for r in caplog.records if "migration" in r.message]) == 1
+    await store.close()

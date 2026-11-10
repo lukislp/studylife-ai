@@ -69,7 +69,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # never spin up a loop that would just log "not configured" every tick.
     sync_task: asyncio.Task[None] | None = None
     if settings.studylife_api_base_url:
-        sync_task = asyncio.create_task(run_periodic_sync(settings))
+        sync_task = asyncio.create_task(run_periodic_sync(settings, registered_key_store))
 
     # The agent graph itself is no longer built here - it's rebuilt per
     # /agent request with the calling user's own StudyLifeClient (see

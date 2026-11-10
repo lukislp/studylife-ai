@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -723,3 +724,31 @@ async def test_sync_all_resumes_by_itself_after_the_user_agrees(
 
     assert "resumed after AI consent" in caplog.text
     assert "alice" not in sync_module._paused_for_consent
+
+
+async def test_sync_all_with_a_shared_store_neither_reopens_nor_closes_it(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The periodic loop passes the app's one store in: sync_all() must use it as-is (no second
+    setup()/migration scan per tick) and leave it open for the lifespan to close."""
+    store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
+    await store.setup()
+    await store.set("alice", "key-a")
+
+    def _must_not_construct(*_args: object, **_kwargs: object) -> RegisteredKeyStore:
+        raise AssertionError("sync_all() built its own RegisteredKeyStore")
+
+    async def _noop_sync_user(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(sync_module, "RegisteredKeyStore", _must_not_construct)
+    monkeypatch.setattr(sync_module, "sync_user", _noop_sync_user)
+    settings = Settings(studylife_api_base_url="http://studylife.test")
+
+    with caplog.at_level(logging.DEBUG, logger="studylife_ai.studylife.registered_keys"):
+        await sync_module.sync_all(settings, registered_keys=store)
+        await sync_module.sync_all(settings, registered_keys=store)
+
+    assert [r for r in caplog.records if "migration" in r.message] == []
+    assert await store.get("alice") == "key-a"  # still open
+    await store.close()
