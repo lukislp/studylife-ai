@@ -14,6 +14,7 @@ Log of notable decisions: what was decided, alternatives considered, and why. Ma
 - [M5 — Deployment & operations](#m5--deployment--operations)
 - [Eval-set expansion: course/session/course_goal coverage, real results](#eval-set-expansion-coursesessioncourse_goal-coverage-real-results)
 - [Post-M5 production hardening](#post-m5-production-hardening) — periodic sync, structured session dates, reranker temperature/model, agent disambiguation, retrieval top-k
+- [Provider description endpoint](#provider-description-endpoint)
 
 Each section groups dated entries; within "Post-M5 production hardening" especially, the date-handling saga (reranker date-awareness → structured session dates → deterministic labels → temperature pinning → model upgrade) is a good single-thread example of iterative root-causing against a live system - each fix confirmed or refuted the next by testing, not assumption.
 
@@ -823,7 +824,7 @@ All of the following were found live, against the real deployment, after M5 itse
 
 ## Provider description endpoint
 
-### 2026-11-10 � `GET /internal/provider-info`: tell StudyLife which AI providers and models see user data **[owner: assistant]**
+### 2026-11-10 — `GET /internal/provider-info`: tell StudyLife which AI providers and models see user data **[owner: assistant]**
 
 - **Why**: StudyLife needs explicit user consent before notes and study data go to a third-party AI provider (Apple App Review guideline 5.1.2(i)). Only this service knows the provider: it is chosen by the operator through `LLM_MODEL`, `EMBEDDING_MODEL`, `RERANK_MODEL` and `DATE_PARSE_MODEL`, and nothing exposed it to StudyLife's backend, let alone its clients.
 - **Decision**: one pure function, `llm/provider_info.py::describe_providers`, derives the description from the configured LiteLLM model strings; one internal endpoint, `GET /internal/provider-info` (same `X-StudyLife-Shared-Secret` check as the other `/internal/*` routes, same dedicated port), returns it. For each configured role (chat, embeddings, rerank, date parsing; the optional two only when set) it reports a provider label, the model name and a `local` flag, plus an overall `any_external`. No change to ingestion, retrieval or chat behaviour.
