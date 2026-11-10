@@ -45,6 +45,46 @@ logger = logging.getLogger(__name__)
 # side without purging a still-valid registration over a blip.
 ZOMBIE_401_THRESHOLD = 20
 
+# StudyLife answers requests made with a user's AI key with 403 and this problem `type` while
+# that user has no consent covering the current AI provider (StudyLife's AiConsentService - the
+# migration case, a withdrawn consent, or a provider change). It is a pause, not a failure: the
+# user's indexed data stays, the registration stays, and the next tick after they answer just
+# works. See docs/decisions.md "Provider description endpoint".
+CONSENT_REQUIRED_PROBLEM = "ai-consent-required"
+
+# Users whose last sync was paused for consent - only to log the pause once instead of every
+# tick (ingestion_sync_interval_seconds, default 60s), and the resumption once.
+_paused_for_consent: set[str] = set()
+
+
+def is_consent_required(exc: httpx.HTTPStatusError) -> bool:
+    """True when `exc` is StudyLife's 403 `ai-consent-required` problem."""
+    if exc.response.status_code != 403:
+        return False
+    try:
+        body = exc.response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("type") == CONSENT_REQUIRED_PROBLEM
+
+
+def note_consent_pause(user_id: str) -> None:
+    """Records a consent pause; logs it only the first time in a row (no log flood, no
+    traceback) - a 403 here is expected, not an error."""
+    if user_id not in _paused_for_consent:
+        _paused_for_consent.add(user_id)
+        logger.info(
+            "Sync: user_id=%s paused - StudyLife reports no AI consent covering the current "
+            "provider; indexed data is kept and sync resumes once the user agrees",
+            user_id,
+        )
+
+
+def note_sync_success(user_id: str) -> None:
+    if user_id in _paused_for_consent:
+        _paused_for_consent.discard(user_id)
+        logger.info("Sync: user_id=%s resumed after AI consent", user_id)
+
 
 def fingerprint_note(note: StudyLifeNote) -> str:
     """Content hash used to detect note changes.
@@ -352,11 +392,16 @@ async def sync_all(settings: Settings) -> None:
                         store=store,
                         registered_keys=registered_keys,
                     )
+                elif is_consent_required(exc):
+                    # Not a zombie (the key is valid; the 401 counter is untouched) and not an
+                    # error: nothing is purged, nothing is logged per tick.
+                    note_consent_pause(user_id)
                 else:
                     logger.exception("Sync: failed for user_id=%s, skipping", user_id)
             except Exception:
                 logger.exception("Sync: failed for user_id=%s, skipping", user_id)
             else:
+                note_sync_success(user_id)
                 await registered_keys.record_sync_success(user_id)
     finally:
         await store.close()

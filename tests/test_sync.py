@@ -622,3 +622,104 @@ async def test_sync_all_purges_exactly_once_after_reaching_the_401_threshold(
 
     assert purge_calls == ["alice"]
     assert any("purging as a zombie registration" in record.message for record in caplog.records)
+
+
+# --- AI consent pause: StudyLife answers 403 `ai-consent-required` while the user has no
+# consent covering the current provider (see CONSENT_REQUIRED_PROBLEM in ingestion/sync.py) ---
+
+
+def _http_403_consent_error(problem_type: str = "ai-consent-required") -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://studylife.test/api/notes")
+    response = httpx.Response(
+        403, json={"type": problem_type, "title": problem_type, "status": 403}, request=request
+    )
+    return httpx.HTTPStatusError("403 Forbidden", request=request, response=response)
+
+
+@pytest.fixture(autouse=True)
+def _reset_consent_pause_state() -> None:
+    sync_module._paused_for_consent.clear()
+
+
+def test_is_consent_required_only_matches_the_consent_problem() -> None:
+    assert sync_module.is_consent_required(_http_403_consent_error()) is True
+    assert sync_module.is_consent_required(_http_403_consent_error("something-else")) is False
+    assert sync_module.is_consent_required(_http_401_error()) is False
+    request = httpx.Request("GET", "http://x")
+    plain = httpx.Response(403, text="nope", request=request)
+    error = httpx.HTTPStatusError("403", request=request, response=plain)
+    assert sync_module.is_consent_required(error) is False
+
+
+async def test_sync_all_pauses_quietly_on_a_consent_403_and_keeps_everything(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    def fake_client_factory(**_kwargs: object) -> None:
+        raise _http_403_consent_error()
+
+    fake_store = FakeQdrantStore(known={})
+    purge_calls: list[str] = []
+
+    async def fake_purge_user(*, user_id: str, **_kwargs: object) -> None:
+        purge_calls.append(user_id)
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "purge_user", fake_purge_user)
+    db_path = str(tmp_path / "registered_keys.db")
+    await _seed_registered_users_on_disk(db_path, {"alice": "key-a"})
+    settings = _settings(
+        registered_keys_db_path=db_path,
+        ai_key_encryption_key=TEST_AI_KEY_ENCRYPTION_KEY,
+        agent_checkpoint_db_path=str(tmp_path / "agent_checkpoints.db"),
+    )
+
+    with caplog.at_level("DEBUG", logger="studylife_ai.ingestion.sync"):
+        # Far more ticks than the zombie threshold: a consent pause must never count towards it.
+        for _ in range(sync_module.ZOMBIE_401_THRESHOLD + 5):
+            await sync_module.sync_all(settings)
+
+    assert purge_calls == []
+    fake_store.delete_entity.assert_not_called()  # nothing already indexed is removed
+    assert caplog.text.count("paused") == 1  # logged once, not every tick
+    assert "Traceback" not in caplog.text
+    assert not any(r.levelname in ("ERROR", "WARNING") for r in caplog.records)
+    store = RegisteredKeyStore(db_path, TEST_AI_KEY_ENCRYPTION_KEY)
+    await store.setup()
+    assert await store.get("alice") == "key-a"  # registration intact
+    await store.close()
+
+
+async def test_sync_all_resumes_by_itself_after_the_user_agrees(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    consent = False
+
+    def fake_client_factory(**kwargs: object) -> FakeStudyLifeClient:
+        if not consent:
+            raise _http_403_consent_error()
+        return FakeStudyLifeClient()
+
+    fake_store = FakeQdrantStore(known={})
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, **_kwargs: object
+    ) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in texts]
+
+    monkeypatch.setattr(sync_module, "StudyLifeClient", fake_client_factory)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    db_path = str(tmp_path / "registered_keys.db")
+    await _seed_registered_users_on_disk(db_path, {"alice": "key-a"})
+    settings = _settings(
+        registered_keys_db_path=db_path, ai_key_encryption_key=TEST_AI_KEY_ENCRYPTION_KEY
+    )
+
+    with caplog.at_level("INFO", logger="studylife_ai.ingestion.sync"):
+        await sync_module.sync_all(settings)
+        consent = True
+        await sync_module.sync_all(settings)
+
+    assert "resumed after AI consent" in caplog.text
+    assert "alice" not in sync_module._paused_for_consent

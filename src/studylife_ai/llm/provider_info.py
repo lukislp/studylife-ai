@@ -1,20 +1,21 @@
 """Describes which AI providers and models this instance sends user data to.
 
 Pure functions only: the description is derived in this one place from the configured LiteLLM
-model strings (`llm_model`, `embedding_model`, `rerank_model`, `date_parse_model`) and
-`llm_api_base`, and exposed by `GET /internal/provider-info` (see api/internal.py). StudyLife's
-backend uses it to decide whether a user must give explicit consent before their notes and study
-data are processed (docs/decisions.md "Provider description endpoint").
-"""
+model strings (`llm_model`, `embedding_model`, `rerank_model`, `date_parse_model`) and exposed by
+`GET /internal/provider-info` (see api/internal.py). StudyLife's backend uses it to decide
+whether a user must give explicit consent before their notes and study data are processed
+(docs/decisions.md "Provider description endpoint").
 
-import ipaddress
-from urllib.parse import urlparse
+Locality is never guessed. A label names who the model is *from* (the LiteLLM prefix), not where
+it runs; `local` is true only when the operator declared it with `AI_MODELS_RUN_LOCALLY`.
+"""
 
 from studylife_ai.config import Settings
 from studylife_ai.schemas.internal import ProviderInfoResponse, ProviderRole
 
 # LiteLLM provider prefixes mapped to a human-readable label. Anything not listed is reported
-# under its raw prefix, so a new provider is never silently mislabelled.
+# under its raw prefix, so a new provider is never silently mislabelled. No label says "local":
+# a prefix such as `ollama` or `hosted_vllm` can just as well point at a remote host.
 _PROVIDER_LABELS: dict[str, str] = {
     "openai": "OpenAI",
     "azure": "Azure OpenAI",
@@ -31,14 +32,11 @@ _PROVIDER_LABELS: dict[str, str] = {
     "bedrock": "Amazon Bedrock",
     "huggingface": "Hugging Face",
     "perplexity": "Perplexity",
-    "ollama": "Ollama (local)",
-    "ollama_chat": "Ollama (local)",
-    "lm_studio": "LM Studio (local)",
-    "hosted_vllm": "vLLM (local)",
+    "ollama": "Ollama",
+    "ollama_chat": "Ollama",
+    "lm_studio": "LM Studio",
+    "hosted_vllm": "vLLM",
 }
-
-# Prefixes whose backend runs on a host the operator controls by definition.
-_LOCAL_PREFIXES = frozenset({"ollama", "ollama_chat", "lm_studio", "hosted_vllm"})
 
 
 def split_model(model: str) -> tuple[str, str]:
@@ -50,42 +48,28 @@ def split_model(model: str) -> tuple[str, str]:
     return prefix.strip().lower(), name.strip()
 
 
-def is_local_base_url(api_base: str | None) -> bool:
-    """True when the URL points at the machine itself or a private network address, i.e. the
-    request cannot leave the operator's own network. Unparseable or public hosts are not local."""
-    if not api_base:
-        return False
-    host = urlparse(api_base).hostname
-    if not host:
-        return False
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        return True
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        # A single-label name (a docker compose or cluster service name) is not publicly routable.
-        return "." not in host
-    return address.is_loopback or address.is_private or address.is_link_local
-
-
-def describe_role(role: str, model: str, *, api_base: str | None = None) -> ProviderRole:
-    """Describe one configured model. `api_base` is only passed for roles that are actually
-    sent to `llm_api_base` (chat, rerank, date parsing); embeddings never use it."""
+def describe_role(role: str, model: str, *, declared_local: bool = False) -> ProviderRole:
+    """Describe one configured model. `declared_local` is the operator's declaration
+    (`Settings.ai_models_run_locally`); a model whose provider cannot even be named stays
+    non-local whatever was declared."""
     prefix, name = split_model(model)
     label = _PROVIDER_LABELS.get(prefix, prefix) if prefix else "unknown"
-    local = prefix in _LOCAL_PREFIXES or (bool(prefix) and is_local_base_url(api_base))
-    return ProviderRole(role=role, provider=label, model=name, local=local)
+    return ProviderRole(
+        role=role, provider=label, model=name, local=declared_local and bool(prefix)
+    )
 
 
 def describe_providers(settings: Settings) -> ProviderInfoResponse:
     """Describe every configured role; optional roles that are unset are omitted."""
-    base = settings.llm_api_base
+    declared = settings.ai_models_run_locally
     roles = [
-        describe_role("chat", settings.llm_model, api_base=base),
-        describe_role("embeddings", settings.embedding_model),
+        describe_role("chat", settings.llm_model, declared_local=declared),
+        describe_role("embeddings", settings.embedding_model, declared_local=declared),
     ]
     if settings.rerank_model:
-        roles.append(describe_role("rerank", settings.rerank_model, api_base=base))
+        roles.append(describe_role("rerank", settings.rerank_model, declared_local=declared))
     if settings.date_parse_model:
-        roles.append(describe_role("date_parse", settings.date_parse_model, api_base=base))
+        roles.append(
+            describe_role("date_parse", settings.date_parse_model, declared_local=declared)
+        )
     return ProviderInfoResponse(roles=roles, any_external=any(not r.local for r in roles))

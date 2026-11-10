@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     # port split".
     allowed_chat_models: str = ""
     llm_api_base: str | None = "http://localhost:11434"
+    # The operator's explicit declaration that EVERY configured model (chat, embeddings, rerank,
+    # date parsing) runs on infrastructure the operator controls and that nothing is forwarded
+    # to a third party. It is the only thing that makes `GET /internal/provider-info` report
+    # `local: true`, which in turn lets StudyLife skip its AI consent dialog. Deliberately NOT
+    # derived from the model prefix or the base URL: `openai/...` with `LLM_API_BASE` pointing
+    # at an in-cluster gateway (e.g. LiteLLM) still reaches OpenAI, and `ollama/...` or
+    # `hosted_vllm/...` can point at a remote host. Default false = external, so a forgotten
+    # setting asks for consent instead of silently skipping it. See docs/decisions.md "Provider
+    # description endpoint".
+    ai_models_run_locally: bool = False
     llm_request_timeout_seconds: float = 60.0
     # For reasoning models only (e.g. OpenAI's gpt-5 family) - "minimal"/"low"/"medium"/"high".
     # Unset (the default) omits the parameter entirely, which is correct for non-reasoning models

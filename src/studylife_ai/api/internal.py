@@ -20,11 +20,17 @@ is still accepted here as a legacy fallback while configured, and
 import hmac
 import logging
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
-from studylife_ai.ingestion.sync import purge_user, sync_user
+from studylife_ai.ingestion.sync import (
+    is_consent_required,
+    note_consent_pause,
+    purge_user,
+    sync_user,
+)
 from studylife_ai.llm.provider_info import describe_providers
 from studylife_ai.rag.enrichment import enrich_capture
 from studylife_ai.schemas.internal import (
@@ -87,6 +93,13 @@ async def _sync_new_registration(user_id: str, ai_api_key: str, store: QdrantSto
             user_id=user_id, ai_api_key=ai_api_key, settings=get_settings(), store=store
         )
         logger.info("Auto-ingestion after registration succeeded for user_id=%s", user_id)
+    except httpx.HTTPStatusError as exc:
+        if is_consent_required(exc):
+            # StudyLife has no consent covering the current provider yet; the periodic sync
+            # picks this user up once they agree.
+            note_consent_pause(user_id)
+        else:
+            logger.exception("Auto-ingestion after registration failed for user_id=%s", user_id)
     except Exception:
         logger.exception("Auto-ingestion after registration failed for user_id=%s", user_id)
 

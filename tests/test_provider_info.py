@@ -4,12 +4,7 @@ from pytest import MonkeyPatch
 
 from studylife_ai.api.internal import SHARED_SECRET_HEADER
 from studylife_ai.config import Settings
-from studylife_ai.llm.provider_info import (
-    describe_providers,
-    describe_role,
-    is_local_base_url,
-    split_model,
-)
+from studylife_ai.llm.provider_info import describe_providers, describe_role, split_model
 from tests.conftest import TEST_SHARED_SECRET
 
 
@@ -20,6 +15,7 @@ def _settings(**overrides: object) -> Settings:
         "rerank_model": None,
         "date_parse_model": None,
         "llm_api_base": None,
+        "ai_models_run_locally": False,
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -40,92 +36,96 @@ def test_split_model(model: str, expected: tuple[str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("model", "label", "local"),
+    ("model", "label"),
     [
-        ("openai/gpt-4o-mini", "OpenAI", False),
-        ("anthropic/claude-sonnet-4", "Anthropic", False),
-        ("ollama/llama3.2", "Ollama (local)", True),
-        ("ollama_chat/llama3.2", "Ollama (local)", True),
-        ("lm_studio/qwen", "LM Studio (local)", True),
-        ("somecloud/model-x", "somecloud", False),
-        ("gpt-4o", "unknown", False),
+        ("openai/gpt-4o-mini", "OpenAI"),
+        ("anthropic/claude-sonnet-4", "Anthropic"),
+        ("ollama/llama3.2", "Ollama"),
+        ("ollama_chat/llama3.2", "Ollama"),
+        ("lm_studio/qwen", "LM Studio"),
+        ("hosted_vllm/qwen", "vLLM"),
+        ("somecloud/model-x", "somecloud"),
+        ("gpt-4o", "unknown"),
     ],
 )
-def test_describe_role_labels_and_locality(model: str, label: str, local: bool) -> None:
+def test_labels_name_the_provider_and_never_claim_locality(model: str, label: str) -> None:
     role = describe_role("chat", model)
     assert role.provider == label
-    assert role.local is local
+    assert "local" not in role.provider.lower()
     assert role.role == "chat"
 
 
 @pytest.mark.parametrize(
-    ("url", "expected"),
+    "model",
     [
-        (None, False),
-        ("", False),
-        ("http://localhost:11434", True),
-        ("http://127.0.0.1:8080/v1", True),
-        ("http://[::1]:8080", True),
-        ("http://192.168.1.20:8000", True),
-        ("http://10.0.0.5", True),
-        ("http://llm-gateway:8000", True),
-        ("http://box.local:8000", True),
-        ("https://api.openai.com/v1", False),
-        ("https://8.8.8.8", False),
-        ("not a url", False),
+        "ollama/llama3.2",
+        "ollama_chat/llama3.2",
+        "lm_studio/qwen",
+        "hosted_vllm/qwen",
+        "openai/gpt-4o",
     ],
 )
-def test_is_local_base_url(url: str | None, expected: bool) -> None:
-    assert is_local_base_url(url) is expected
+def test_a_prefix_alone_never_makes_a_model_local(model: str) -> None:
+    assert describe_role("chat", model).local is False
 
 
-def test_local_base_url_makes_an_openai_compatible_model_local() -> None:
-    role = describe_role("chat", "openai/my-model", api_base="http://localhost:8000/v1")
-    assert role.provider == "OpenAI"
-    assert role.local is True
+@pytest.mark.parametrize(
+    "api_base",
+    [
+        "http://localhost:11434",
+        "http://192.168.1.20:8000",
+        "http://litellm:4000",
+        "http://box.local",
+    ],
+)
+def test_a_private_base_url_alone_never_makes_a_model_local(api_base: str) -> None:
+    # `openai/...` behind an in-cluster gateway still reaches OpenAI.
+    info = describe_providers(_settings(llm_model="openai/gpt-4o", llm_api_base=api_base))
+    chat = next(r for r in info.roles if r.role == "chat")
+    assert chat.local is False
+    assert info.any_external is True
 
 
-def test_public_base_url_does_not_make_a_model_local() -> None:
-    assert describe_role("chat", "openai/gpt-4o", api_base="https://api.openai.com").local is False
-
-
-def test_unknown_provider_is_never_local_even_with_a_local_base_url() -> None:
-    assert describe_role("chat", "gpt-4o", api_base="http://localhost:8000").local is False
-
-
-def test_all_local_defaults_are_not_external() -> None:
-    info = describe_providers(_settings())
-    assert [r.role for r in info.roles] == ["chat", "embeddings"]
+def test_the_operator_declaration_makes_every_model_local() -> None:
+    info = describe_providers(
+        _settings(
+            ai_models_run_locally=True,
+            rerank_model="ollama/llama3.2",
+            date_parse_model="ollama/llama3.2",
+        )
+    )
+    assert [r.local for r in info.roles] == [True, True, True, True]
     assert info.any_external is False
 
 
-def test_one_external_role_makes_the_instance_external() -> None:
-    info = describe_providers(
-        _settings(llm_model="openai/gpt-4o-mini", embedding_model="openai/text-embedding-3-small")
-    )
+def test_declared_local_is_ignored_for_a_model_without_a_provider_prefix() -> None:
+    assert describe_role("chat", "gpt-4o", declared_local=True).local is False
+
+
+def test_default_is_external_even_for_all_ollama_models() -> None:
+    info = describe_providers(_settings())
+    assert [r.role for r in info.roles] == ["chat", "embeddings"]
+    assert all(not r.local for r in info.roles)
     assert info.any_external is True
-    assert {r.provider for r in info.roles} == {"OpenAI"}
+
+
+def test_declaration_is_off_by_default() -> None:
+    assert Settings().ai_models_run_locally is False  # type: ignore[call-arg]
 
 
 def test_optional_roles_appear_only_when_configured() -> None:
     info = describe_providers(
         _settings(rerank_model="openai/gpt-5-mini", date_parse_model="ollama/llama3.2")
     )
-    by_role = {r.role: r for r in info.roles}
-    assert set(by_role) == {"chat", "embeddings", "rerank", "date_parse"}
-    assert by_role["rerank"].local is False
-    assert by_role["date_parse"].local is True
-    assert info.any_external is True
+    assert {r.role for r in info.roles} == {"chat", "embeddings", "rerank", "date_parse"}
 
 
-def test_embeddings_ignore_the_chat_base_url() -> None:
+def test_mixed_providers_are_each_reported() -> None:
     info = describe_providers(
-        _settings(
-            embedding_model="openai/text-embedding-3-small", llm_api_base="http://localhost:1"
-        )
+        _settings(llm_model="openai/gpt-4o-mini", embedding_model="openai/text-embedding-3-small")
     )
-    embeddings = next(r for r in info.roles if r.role == "embeddings")
-    assert embeddings.local is False
+    assert {r.provider for r in info.roles} == {"OpenAI"}
+    assert info.any_external is True
 
 
 async def test_provider_info_endpoint_requires_the_shared_secret(
@@ -160,9 +160,9 @@ async def test_provider_info_endpoint_returns_the_description(
             {"role": "chat", "provider": "OpenAI", "model": "gpt-4o-mini", "local": False},
             {
                 "role": "embeddings",
-                "provider": "Ollama (local)",
+                "provider": "Ollama",
                 "model": "nomic-embed-text",
-                "local": True,
+                "local": False,
             },
         ],
         "any_external": True,

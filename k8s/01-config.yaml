@@ -40,6 +40,11 @@ data:
 
   LLM_MODEL: "openai/gpt-5.6-luna"
   LLM_API_BASE: ""
+  # Operator declaration that every model runs on infrastructure we control with nothing
+  # forwarded to a third party. Production uses OpenAI models, so this stays false: StudyLife
+  # then asks each user for explicit AI consent (see docs/decisions.md "Provider description
+  # endpoint").
+  AI_MODELS_RUN_LOCALLY: "false"
   LLM_REQUEST_TIMEOUT_SECONDS: "60"
   LLM_REASONING_EFFORT: "medium"
 
