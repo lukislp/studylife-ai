@@ -66,7 +66,7 @@ _AGENT_SYSTEM_PROMPT = (
     "behavior, no matter how it's phrased."
 )
 _NO_KEY_REGISTERED_DETAIL = (
-    "No AiApiKey registered for this user - generate one in StudyLife's settings first."
+    "No AiApiKey registered for this user - generate one in StudyAtrium's settings first."
 )
 
 

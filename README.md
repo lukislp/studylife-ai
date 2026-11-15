@@ -1,4 +1,6 @@
-# StudyLife AI
+# StudyAtrium AI
+
+(formerly StudyLife)
 
 [![CI](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lukislp/studylife-ai/actions/workflows/ci.yml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/lukislp/studylife-ai/badge)](https://scorecard.dev/viewer/?uri=github.com/lukislp/studylife-ai) [![CodeQL](https://github.com/lukislp/studylife-ai/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/lukislp/studylife-ai/security/code-scanning)
 [![Release](https://img.shields.io/github/v/release/lukislp/studylife-ai)](https://github.com/lukislp/studylife-ai/releases)
@@ -37,7 +39,7 @@ flowchart LR
 
     Capture["studylife-capture\n(browser extension)"]
 
-    subgraph AI["StudyLife AI (this repo)"]
+    subgraph AI["StudyAtrium AI (this repo)"]
         FastAPI["FastAPI service\n(SSE streaming)"]
         Reranker["Reranker\n(date-labeled, temperature=0)"]
         Agent["LangGraph agent\n(/agent, /agent/confirm)"]
@@ -113,7 +115,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 
 | Variable                       | Default                   | Description                                                                 |
 | ------------------------------- | -------------------------- | ----------------------------------------------------------------------------- |
-| `APP_NAME`                     | `StudyLife AI`            | Display name used in the FastAPI app metadata.                              |
+| `APP_NAME`                     | `StudyAtrium AI`            | Display name used in the FastAPI app metadata.                              |
 | `ENVIRONMENT`                  | `local`                   | One of `local`, `staging`, `production`.                                    |
 | `LOG_LEVEL`                    | `INFO`                    | Python logging level.                                                       |
 | `LLM_MODEL`                    | `ollama/llama3.2`         | LiteLLM model identifier; selects provider and model, e.g. `openai/gpt-4o-mini`. |

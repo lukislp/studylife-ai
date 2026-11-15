@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "StudyLife AI"
+    app_name: str = "StudyAtrium AI"
     environment: Literal["local", "staging", "production"] = "local"
     log_level: str = "INFO"
 

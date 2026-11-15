@@ -49,7 +49,7 @@ def create_internal_app() -> FastAPI:
     (main.py's `_lifespan`) must set `.state.qdrant_store` / `.state.registered_key_store` /
     `.state.agent_checkpointer` on the returned app before serving it - `internal.router`'s
     handlers read those off `http_request.app.state`, same as on the main app."""
-    internal_app = FastAPI(title="StudyLife AI (internal)")
+    internal_app = FastAPI(title="StudyAtrium AI (internal)")
     internal_app.include_router(internal.router)
     return internal_app
 
