@@ -1,6 +1,6 @@
-# Contributing to StudyLife AI
+# Contributing to StudyAtrium AI
 
-Thanks for taking the time. StudyLife AI is a single-maintainer project, so the process is
+Thanks for taking the time. StudyAtrium AI is a single-maintainer project, so the process is
 deliberately small - but it is the same for every change, including the maintainer's own.
 
 ## How changes get in

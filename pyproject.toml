@@ -1,7 +1,7 @@
 [project]
 name = "studylife-ai"
 version = "0.1.0"
-description = "LLM agent microservice extending StudyLife (Blazor WASM + ASP.NET Core) with RAG, study planning, and agent actions."
+description = "LLM agent microservice extending StudyAtrium (Blazor WASM + ASP.NET Core) with RAG, study planning, and agent actions."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

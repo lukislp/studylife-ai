@@ -40,7 +40,7 @@ def build_tools(
     async def list_courses() -> list[dict[str, object]]:
         """List all courses with their id, name, code, and ECTS.
 
-        StudyLife's API validates course_id against the user's own catalog
+        StudyAtrium's API validates course_id against the user's own catalog
         when creating a session or note - an id that doesn't exist gets
         rejected with a 400 error, which would fail the confirmed action
         after the user already approved it. Always call this first to
@@ -82,7 +82,7 @@ def build_tools(
         topic: str | None = None,
         notes: str | None = None,
     ) -> dict[str, object]:
-        """Propose creating a new study session in StudyLife's calendar.
+        """Propose creating a new study session in StudyAtrium's calendar.
 
         Requires human confirmation before it actually executes - calling
         this only proposes the session, it does not create it yet.
@@ -92,7 +92,7 @@ def build_tools(
             course_name: The course's exact name, from list_courses.
             start_time: When the session starts.
             end_time: When the session ends - must be after start_time, at
-                most 24 hours later (StudyLife rejects anything longer).
+                most 24 hours later (StudyAtrium rejects anything longer).
             topic: What the session covers, if known.
             notes: Any additional notes for the session.
         """
@@ -113,7 +113,7 @@ def build_tools(
     async def save_note(
         title: str, content: str, course_id: int | None = None
     ) -> dict[str, object]:
-        """Propose saving a new note in StudyLife (e.g. a summary you wrote).
+        """Propose saving a new note in StudyAtrium (e.g. a summary you wrote).
 
         Requires human confirmation before it actually executes.
 

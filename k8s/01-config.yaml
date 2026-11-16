@@ -34,7 +34,7 @@ metadata:
   name: studylife-ai-config
   namespace: studylife-ai
 data:
-  APP_NAME: "StudyLife AI"
+  APP_NAME: "StudyAtrium AI"
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
 
