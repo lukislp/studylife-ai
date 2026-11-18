@@ -25,7 +25,7 @@ process, would be redundant, not safer), and runs it via `build_internal_server`
 
 Transition history, not current behavior: for one release, `internal.router` was ALSO included
 on the main app (`app.include_router(internal.router, dependencies=[Depends(
-log_deprecated_main_port_access)])`), so StudyLife's backend kept working unchanged whether or
+log_deprecated_main_port_access)])`), so StudyAtrium's backend kept working unchanged whether or
 not it had switched over to calling `INTERNAL_API_PORT` yet, in either deploy order - each hit
 logged a deprecation warning via a dependency that only that inclusion got, never
 `create_internal_app()`'s own inclusion of the same router. That fallback inclusion and the

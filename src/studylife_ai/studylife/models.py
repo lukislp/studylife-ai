@@ -1,4 +1,4 @@
-"""Pydantic models mirroring StudyLife's REST API DTOs.
+"""Pydantic models mirroring StudyAtrium's REST API DTOs.
 
 Field names follow StudyLife's `NoteDto` (`StudyLife.Shared/Dtos.cs`); the
 API serializes camelCase JSON (ASP.NET Core's default for
@@ -13,7 +13,7 @@ from pydantic.alias_generators import to_camel
 
 
 class _StudyLifeDto(BaseModel):
-    """Shared config for all StudyLife API DTOs: the API serializes camelCase
+    """Shared config for all StudyAtrium API DTOs: the API serializes camelCase
     JSON (ASP.NET Core's default for `AddControllersWithViews`), so a camelCase
     alias generator maps that onto Python's snake_case convention. One shared
     base instead of repeating this on every DTO, so a future tweak (e.g.

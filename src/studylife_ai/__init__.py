@@ -1,1 +1,1 @@
-"""StudyLife AI — LLM agent microservice for the StudyLife platform."""
+"""StudyAtrium AI — LLM agent microservice for the StudyAtrium platform."""

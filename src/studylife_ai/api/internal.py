@@ -1,4 +1,4 @@
-"""Internal endpoints StudyLife's backend calls to keep studylife-ai's
+"""Internal endpoints StudyAtrium's backend calls to keep studylife-ai's
 per-user AiApiKey registry in sync (see docs/decisions.md "M4.5 Multi-user
 support" - "Registration-on-generate"). Not part of the public /chat, /agent
 surface - meant to be reachable only from StudyLife's backend, same trust
@@ -97,7 +97,7 @@ async def _sync_new_registration(user_id: str, ai_api_key: str, store: QdrantSto
         logger.info("Auto-ingestion after registration succeeded for user_id=%s", user_id)
     except httpx.HTTPStatusError as exc:
         if is_consent_required(exc):
-            # StudyLife has no consent covering the current provider yet; the periodic sync
+            # StudyAtrium has no consent covering the current provider yet; the periodic sync
             # picks this user up once they agree.
             note_consent_pause(user_id)
         else:
@@ -113,7 +113,7 @@ async def register_key(
     _require_valid_secret(http_request)
     await http_request.app.state.registered_key_store.set(request.user_id, request.ai_api_key)
     logger.info("Registered AiApiKey for user_id=%s", request.user_id)
-    # Fire-and-forget: the caller (StudyLife's GenerateAiApiKey) gets its response immediately
+    # Fire-and-forget: the caller (StudyAtrium's GenerateAiApiKey) gets its response immediately
     # rather than waiting out a full sync - see docs/decisions.md "Auto-ingestion on register".
     settings = get_settings()
     if settings.studylife_api_base_url:
@@ -149,14 +149,14 @@ async def revoke_key(request: RevokeKeyRequest, http_request: Request) -> dict[s
 async def enrich_capture_endpoint(
     request: EnrichCaptureRequest, http_request: Request
 ) -> EnrichCaptureResponse:
-    """Called by StudyLife's BackgroundTaskService (CaptureEnrichment sub-task) shortly after a
+    """Called by StudyAtrium's BackgroundTaskService (CaptureEnrichment sub-task) shortly after a
     studylife-capture browser-extension save - course-matching, related-notes lookup, tag/
     summary generation, and immediate Qdrant ingestion for one note. See rag/enrichment.py for
     the actual logic; this endpoint is just the internal-trust-boundary wrapper (same auth as
     register-key/revoke-key above)."""
     _require_valid_secret(http_request)
     # GDPR audit F-20: the content below goes to an embedding and a chat model - verify the AI
-    # consent here instead of trusting that StudyLife checked it before calling. 403 when the
+    # consent here instead of trusting that StudyAtrium checked it before calling. 403 when the
     # user has none, 503 when it cannot be established (nothing is sent to a model either way).
     await enforce_ai_consent(http_request, request.user_id)
     settings = get_settings()

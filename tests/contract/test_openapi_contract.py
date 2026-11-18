@@ -1,4 +1,4 @@
-"""Contract tests against StudyLife's committed OpenAPI spec (`docs/api/openapi.json` in the
+"""Contract tests against StudyAtrium's committed OpenAPI spec (`docs/api/openapi.json` in the
 main `studylife` repo) - audit finding D2/D3: this repo hand-mirrors StudyLife's DTOs
 (`studylife/models.py`) and hardcodes endpoint knowledge (`studylife/client.py`) with zero
 drift detection. These tests fetch that spec and assert:
@@ -16,7 +16,7 @@ surprise.
 
 Spec source (`STUDYLIFE_OPENAPI_SPEC`): a local file path or an http(s) URL. Defaults to the
 studylife repo's own raw GitHub URL - there is no package/artifact distribution channel for the
-spec (see docs/decisions.md "No Swagger/OpenAPI in the StudyLife repo", now resolved upstream by
+spec (see docs/decisions.md "No Swagger/OpenAPI in the StudyAtrium repo", now resolved upstream by
 the spec's addition at docs/api/openapi.json).
 
 Reachability: in CI, an unreachable/unparsable spec FAILS this module outright - skipping would
@@ -45,9 +45,9 @@ from studylife_ai.studylife.models import (
 
 DEFAULT_SPEC_URL = "https://raw.githubusercontent.com/lukislp/studylife/main/docs/api/openapi.json"
 
-# Every StudyLife endpoint studylife_ai/studylife/client.py calls, read exhaustively from that
+# Every StudyAtrium endpoint studylife_ai/studylife/client.py calls, read exhaustively from that
 # file (its only `self._client.get(...)`/`self._client.post(...)` call sites - grep confirms no
-# other module in this repo talks to the StudyLife API directly). None of these are actually
+# other module in this repo talks to the StudyAtrium API directly). None of these are actually
 # path-templated today (no `/api/sessions/{id}`-style calls exist yet), but `_path_regex()`
 # below still handles `{param}` segments structurally for whenever one is added.
 CALLED_ENDPOINTS: list[tuple[str, str]] = [
@@ -99,7 +99,7 @@ def spec() -> dict[str, Any]:
     except Exception as exc:
         if _is_ci():
             pytest.fail(
-                f"Could not load the StudyLife OpenAPI spec from {source!r} in CI - contract "
+                f"Could not load the StudyAtrium OpenAPI spec from {source!r} in CI - contract "
                 f"tests MUST fail here, not skip (that's the point of the check): {exc!r}"
             )
         if explicit:
@@ -163,7 +163,7 @@ def test_called_endpoint_exists_in_spec(spec: dict[str, Any], method: str, path:
 def _resolve_schema(spec: dict[str, Any], schema_name: str) -> dict[str, Any]:
     schemas = spec.get("components", {}).get("schemas", {})
     assert schema_name in schemas, (
-        f"Component schema {schema_name!r} not found in the StudyLife OpenAPI spec's "
+        f"Component schema {schema_name!r} not found in the StudyAtrium OpenAPI spec's "
         f"components/schemas - the DTO was renamed or removed server-side. Available schemas: "
         f"{sorted(schemas)}"
     )

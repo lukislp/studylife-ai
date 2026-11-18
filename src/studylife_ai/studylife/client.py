@@ -1,4 +1,4 @@
-"""Async HTTP client for the StudyLife REST API.
+"""Async HTTP client for the StudyAtrium REST API.
 
 Auth is a static `X-Api-Key` header (StudyLife's custom middleware — see
 `Program.cs` in the StudyLife repo), minted once via the StudyLife setup UI.
@@ -35,16 +35,16 @@ class StudyLifeClient:
             timeout=timeout,
             transport=transport,
             # A path here REPLACES httpx's default (certifi) trust store with just this CA, not
-            # in addition to it - fine since this client only ever talks to StudyLife's own API
+            # in addition to it - fine since this client only ever talks to StudyAtrium's own API
             # (a private cert-manager CA, e.g. in the k3s deployment), never any other host.
             # `True` (unset) keeps httpx's normal default trust store, matching local dev where
-            # StudyLife runs on plain HTTP/localhost. ssl.create_default_context(cafile=...),
+            # StudyAtrium runs on plain HTTP/localhost. ssl.create_default_context(cafile=...),
             # not the bare path string - httpx deprecated passing verify= a raw string path.
             verify=ssl.create_default_context(cafile=ca_cert_path) if ca_cert_path else True,
         )
 
     async def check_ai_access(self) -> None:
-        """Cheapest authenticated read (`GET /api/courses`, body ignored). StudyLife answers any
+        """Cheapest authenticated read (`GET /api/courses`, body ignored). StudyAtrium answers any
         request made with an AiApiKey with 403 `ai-consent-required` while the user has no AI
         consent covering the current provider, so a success here means "consent is in place"
         and `httpx.HTTPStatusError` carries the refusal otherwise."""

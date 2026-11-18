@@ -88,7 +88,7 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
         monkeypatch.setattr(f"studylife_ai.api.{module}.get_settings", _fake_get_settings)
 
     # Default: the AI consent gate (GDPR audit F-20) lets everything through, so the many tests
-    # that are about something else need no StudyLife consent stub. tests/test_consent.py and the
+    # that are about something else need no StudyAtrium consent stub. tests/test_consent.py and the
     # consent cases in test_chat/test_internal swap in a refusing or the real implementation.
     async def _consent_granted(*_args: object, **_kwargs: object) -> None:
         return None

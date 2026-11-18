@@ -1,4 +1,4 @@
-"""Persistent store of per-user StudyLife AiApiKeys, registered by StudyLife
+"""Persistent store of per-user StudyAtrium AiApiKeys, registered by StudyAtrium
 itself (see docs/decisions.md "M4.5 Multi-user support").
 
 StudyLife's backend calls POST /internal/register-key the moment a user
@@ -51,7 +51,7 @@ def _build_fernet(encryption_key: str | None) -> MultiFernet:
     if not encryption_key:
         raise RuntimeError(
             "AI_KEY_ENCRYPTION_KEY is not set. Every registered AiApiKey is a full, usable "
-            "StudyLife account credential and must be encrypted at rest (see config.py's "
+            "StudyAtrium account credential and must be encrypted at rest (see config.py's "
             "ai_key_encryption_key). Generate one with:\n"
             f"  {_GENERATE_KEY_HINT}\n"
             "and set it as AI_KEY_ENCRYPTION_KEY (see .env.example)."
@@ -60,7 +60,7 @@ def _build_fernet(encryption_key: str | None) -> MultiFernet:
     if not raw_keys:
         raise RuntimeError(
             "AI_KEY_ENCRYPTION_KEY is not set. Every registered AiApiKey is a full, usable "
-            "StudyLife account credential and must be encrypted at rest (see config.py's "
+            "StudyAtrium account credential and must be encrypted at rest (see config.py's "
             "ai_key_encryption_key). Generate one with:\n"
             f"  {_GENERATE_KEY_HINT}\n"
             "and set it as AI_KEY_ENCRYPTION_KEY (see .env.example)."

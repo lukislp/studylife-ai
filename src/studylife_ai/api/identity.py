@@ -1,13 +1,13 @@
-"""Resolves the calling StudyLife user's identity from a signed proxy token.
+"""Resolves the calling StudyAtrium user's identity from a signed proxy token.
 
 Forwarded by StudyLife's own ASP.NET Core backend, which proxies chat/agent
 requests on behalf of an already-authenticated (passkey session) user - see
 docs/decisions.md "M4.5 Multi-user support" ("Auth flow, take two: a
 short-lived signed proxy token").
 
-The token is NOT the user's `AiApiKey` (StudyLife only ever stores a hash of
+The token is NOT the user's `AiApiKey` (StudyAtrium only ever stores a hash of
 that, never the plaintext, after the moment it's generated - so the backend
-cannot forward it). It's a short-lived token, minted by StudyLife per request
+cannot forward it). It's a short-lived token, minted by StudyAtrium per request
 from a real, already-authenticated session, and verified here purely locally
 (no network round-trip). Verifying the signature IS verifying the claimed
 `user_id` - unlike the old `AiApiKey`-based design, there is no separate
