@@ -1,6 +1,7 @@
+import logging
 from datetime import date
 
-from pytest import MonkeyPatch
+from pytest import LogCaptureFixture, MonkeyPatch
 
 from studylife_ai.ingestion.qdrant_store import RetrievedChunk
 from studylife_ai.rag import rerank as rerank_module
@@ -256,3 +257,13 @@ async def test_rerank_chunks_falls_back_to_original_order_on_llm_failure(
     )
 
     assert result == chunks
+
+
+def test_parse_order_warning_does_not_log_the_raw_model_output(caplog: LogCaptureFixture) -> None:
+    secret_text = "note content the model echoed back 123456"
+    with caplog.at_level(logging.WARNING):
+        _parse_order(secret_text, 10)
+
+    assert any("recognized only" in r.message for r in caplog.records)
+    assert "note content" not in caplog.text
+    assert str(len(secret_text)) in caplog.text

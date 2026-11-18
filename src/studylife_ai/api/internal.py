@@ -23,6 +23,7 @@ import logging
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+from studylife_ai.api.consent import enforce_ai_consent
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.sync import (
@@ -40,6 +41,7 @@ from studylife_ai.schemas.internal import (
     RegisterKeyRequest,
     RevokeKeyRequest,
 )
+from studylife_ai.studylife.consent import forget_consent
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,7 @@ async def revoke_key(request: RevokeKeyRequest, http_request: Request) -> dict[s
     why - shared with the sync loop's own zombie-registration cleanup so there is one purge
     implementation, not two."""
     _require_valid_secret(http_request)
+    forget_consent(request.user_id)
     await purge_user(
         user_id=request.user_id,
         store=http_request.app.state.qdrant_store,
@@ -152,6 +155,10 @@ async def enrich_capture_endpoint(
     the actual logic; this endpoint is just the internal-trust-boundary wrapper (same auth as
     register-key/revoke-key above)."""
     _require_valid_secret(http_request)
+    # GDPR audit F-20: the content below goes to an embedding and a chat model - verify the AI
+    # consent here instead of trusting that StudyLife checked it before calling. 403 when the
+    # user has none, 503 when it cannot be established (nothing is sent to a model either way).
+    await enforce_ai_consent(http_request, request.user_id)
     settings = get_settings()
     result = await enrich_capture(
         request.note_id,

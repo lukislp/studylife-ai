@@ -43,6 +43,14 @@ class StudyLifeClient:
             verify=ssl.create_default_context(cafile=ca_cert_path) if ca_cert_path else True,
         )
 
+    async def check_ai_access(self) -> None:
+        """Cheapest authenticated read (`GET /api/courses`, body ignored). StudyLife answers any
+        request made with an AiApiKey with 403 `ai-consent-required` while the user has no AI
+        consent covering the current provider, so a success here means "consent is in place"
+        and `httpx.HTTPStatusError` carries the refusal otherwise."""
+        response = await self._client.get("/api/courses")
+        response.raise_for_status()
+
     async def get_notes(self) -> list[StudyLifeNote]:
         """Fetch all notes.
 
