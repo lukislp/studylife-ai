@@ -39,14 +39,14 @@ from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 logger = logging.getLogger(__name__)
 
 # Consecutive 401s from sync_all() before a registration is treated as a zombie (audit F5/F13):
-# the AiApiKey was regenerated in StudyLife without a matching /internal/revoke-key call, so
+# the AiApiKey was regenerated in StudyAtrium without a matching /internal/revoke-key call, so
 # this account 401s on every ingestion_sync_interval_seconds tick forever unless purged. 20
-# ticks (~20 minutes at the default 60s interval) tolerates a transient outage on StudyLife's
+# ticks (~20 minutes at the default 60s interval) tolerates a transient outage on StudyAtrium's
 # side without purging a still-valid registration over a blip.
 ZOMBIE_401_THRESHOLD = 20
 
-# StudyLife answers requests made with a user's AI key with 403 and this problem `type` while
-# that user has no consent covering the current AI provider (StudyLife's AiConsentService - the
+# StudyAtrium answers requests made with a user's AI key with 403 and this problem `type` while
+# that user has no consent covering the current AI provider (StudyAtrium's AiConsentService - the
 # migration case, a withdrawn consent, or a provider change). It is a pause, not a failure: the
 # user's indexed data stays, the registration stays, and the next tick after they answer just
 # works. See docs/decisions.md "Provider description endpoint".
@@ -58,7 +58,7 @@ _paused_for_consent: set[str] = set()
 
 
 def is_consent_required(exc: httpx.HTTPStatusError) -> bool:
-    """True when `exc` is StudyLife's 403 `ai-consent-required` problem."""
+    """True when `exc` is StudyAtrium's 403 `ai-consent-required` problem."""
     if exc.response.status_code != 403:
         return False
     try:
@@ -74,7 +74,7 @@ def note_consent_pause(user_id: str) -> None:
     if user_id not in _paused_for_consent:
         _paused_for_consent.add(user_id)
         logger.info(
-            "Sync: user_id=%s paused - StudyLife reports no AI consent covering the current "
+            "Sync: user_id=%s paused - StudyAtrium reports no AI consent covering the current "
             "provider; indexed data is kept and sync resumes once the user agrees",
             user_id,
         )
@@ -355,7 +355,7 @@ async def purge_user(
 async def sync_all(
     settings: Settings, *, registered_keys: RegisteredKeyStore | None = None
 ) -> None:
-    """Syncs every registered StudyLife account (see docs/decisions.md
+    """Syncs every registered StudyAtrium account (see docs/decisions.md
     "M4.5 Multi-user support") into its own Qdrant partition, one after
     another - not concurrently, since each user's own four-endpoint fetch is
     already the parallel unit of work, and running multiple users at once
@@ -385,7 +385,7 @@ async def sync_all(
         user_ids = await registered_keys.list_user_ids()
         if not user_ids:
             raise RuntimeError(
-                "No users registered - generate an AiApiKey in StudyLife's settings first."
+                "No users registered - generate an AiApiKey in StudyAtrium's settings first."
             )
         for user_id in user_ids:
             logger.info("Sync: starting user_id=%s", user_id)

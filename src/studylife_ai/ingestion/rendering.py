@@ -1,4 +1,4 @@
-"""Renders StudyLife courses/sessions/course goals into embeddable text.
+"""Renders StudyAtrium courses/sessions/course goals into embeddable text.
 
 Unlike notes (freeform text a user typed), these are structured records —
 each render function turns one entity into a single natural-language block
@@ -22,7 +22,7 @@ _DATE_FORMAT = "%Y-%m-%d"
 # render_session()'s own use of it rather than duplicating the literal.
 DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
-# "table" matches Markdig's default pipe-table support (StudyLife's Markdown renderer) - without
+# "table" matches Markdig's default pipe-table support (StudyAtrium's Markdown renderer) - without
 # it mistune would leave table syntax as literal text instead of parsing it into <table> markup.
 _markdown_to_html = mistune.create_markdown(plugins=["table"])
 

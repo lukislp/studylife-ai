@@ -1,1 +1,1 @@
-"""Client for the StudyLife REST API (the platform this service extends)."""
+"""Client for the StudyAtrium REST API (the platform this service extends)."""

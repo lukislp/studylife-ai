@@ -1,4 +1,4 @@
-"""TLS listeners (tls.py): real handshakes against a throwaway private CA, the way StudyLife's
+"""TLS listeners (tls.py): real handshakes against a throwaway private CA, the way StudyAtrium's
 backend connects (its own CA, host name checked). Like test_internal_server.py, these use real
 sockets on OS-assigned ports instead of the ASGITransport fixture."""
 

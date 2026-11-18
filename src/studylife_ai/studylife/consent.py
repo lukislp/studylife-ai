@@ -3,7 +3,7 @@
 StudyLife's backend already checks the user's AI consent before it proxies a request here, but
 this service is the one that actually sends user content to a model, so it must not rely on the
 caller having checked. `ensure_ai_consent` asks StudyLife itself: it makes one cheap
-authenticated read with the user's registered AiApiKey, and StudyLife answers any such request
+authenticated read with the user's registered AiApiKey, and StudyAtrium answers any such request
 with 403 `ai-consent-required` while the user has no consent covering the current provider
 (the same signal ingestion already treats as a pause, see ingestion/sync.py).
 
@@ -82,18 +82,18 @@ async def ensure_ai_consent(
         if is_consent_required(exc):
             raise ConsentRequired from exc
         logger.warning(
-            "AI consent not verifiable for user_id=%s: StudyLife answered %d",
+            "AI consent not verifiable for user_id=%s: StudyAtrium answered %d",
             user_id,
             exc.response.status_code,
         )
-        raise ConsentUnverifiable("StudyLife rejected the consent probe.") from exc
+        raise ConsentUnverifiable("StudyAtrium rejected the consent probe.") from exc
     except httpx.HTTPError as exc:
         _allowed_until.pop(user_id, None)
         logger.warning(
-            "AI consent not verifiable for user_id=%s: StudyLife unreachable (%s)",
+            "AI consent not verifiable for user_id=%s: StudyAtrium unreachable (%s)",
             user_id,
             type(exc).__name__,
         )
-        raise ConsentUnverifiable("StudyLife could not be reached.") from exc
+        raise ConsentUnverifiable("StudyAtrium could not be reached.") from exc
 
     _allowed_until[user_id] = time.monotonic() + settings.ai_consent_cache_seconds

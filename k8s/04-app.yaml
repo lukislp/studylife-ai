@@ -52,7 +52,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: studylife-ai
-          image: ghcr.io/lukislp/studylife-ai:1.18.12 # set by the deploy-bump job (CI) on every release
+          image: ghcr.io/lukislp/studylife-ai:1.18.13 # set by the deploy-bump job (CI) on every release
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
@@ -63,9 +63,9 @@ spec:
           envFrom:
             - configMapRef: {name: studylife-ai-config}
             - secretRef: {name: studylife-ai-secrets}
-          # HTTPS listeners for the StudyLife -> studylife-ai hop (src/studylife_ai/tls.py): the
+          # HTTPS listeners for the StudyAtrium -> studylife-ai hop (src/studylife_ai/tls.py): the
           # public routes on 8443 and /internal/* on 8444, with the cert-manager certificate from
-          # 07-tls-certificate.yaml. StudyLife calls these ports and validates the certificate
+          # 07-tls-certificate.yaml. StudyAtrium calls these ports and validates the certificate
           # against its internal CA. Removing these two variables is the explicit opt-out back to
           # plain HTTP only.
           env:
@@ -80,13 +80,13 @@ spec:
             # enrich-capture) is served ONLY here, on INTERNAL_API_PORT (studylife-ai-config) - a
             # second uvicorn.Server task in the same process (internal_server.py), not a second
             # container. Lets 05-network-policies.yaml scope ingress on THIS port to just
-            # StudyLife's own backend pods, tighter than port 8000 (also reachable by
+            # StudyAtrium's own backend pods, tighter than port 8000 (also reachable by
             # Prometheus for /metrics) - update the placeholder port number below only if
             # INTERNAL_API_PORT is ever overridden away from its default (8001) in
             # studylife-ai-config.
             - containerPort: 8001
             # TLS_PORT / INTERNAL_API_TLS_PORT defaults (config.py): HTTPS for the same two apps.
-            # The plain ports above stay for the kubelet probes and Prometheus; StudyLife's
+            # The plain ports above stay for the kubelet probes and Prometheus; StudyAtrium's
             # backend only uses these two (its AddonTls:RequireHttps refuses http:// URLs).
             - containerPort: 8443
             - containerPort: 8444
@@ -159,7 +159,7 @@ spec:
     - name: internal
       port: 8001
       targetPort: 8001
-    # HTTPS for the StudyLife -> studylife-ai hop (tls.py, 07-tls-certificate.yaml). StudyLife's
+    # HTTPS for the StudyAtrium -> studylife-ai hop (tls.py, 07-tls-certificate.yaml). StudyAtrium's
     # StudyLifeAi__BaseUrl / __InternalBaseUrl point here.
     - name: https
       port: 8443

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Runtime configuration for the StudyLife AI service.
+    """Runtime configuration for the StudyAtrium AI service.
 
     All values can be overridden via environment variables or a local
     `.env` file (see `.env.example`). Provider-specific LLM credentials
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # The operator's explicit declaration that EVERY configured model (chat, embeddings, rerank,
     # date parsing) runs on infrastructure the operator controls and that nothing is forwarded
     # to a third party. It is the only thing that makes `GET /internal/provider-info` report
-    # `local: true`, which in turn lets StudyLife skip its AI consent dialog. Deliberately NOT
+    # `local: true`, which in turn lets StudyAtrium skip its AI consent dialog. Deliberately NOT
     # derived from the model prefix or the base URL: `openai/...` with `LLM_API_BASE` pointing
     # at an in-cluster gateway (e.g. LiteLLM) still reaches OpenAI, and `ollama/...` or
     # `hosted_vllm/...` can point at a remote host. Default false = external, so a forgotten
@@ -63,26 +63,26 @@ class Settings(BaseSettings):
     # reply burned 64 hidden reasoning tokens - "minimal" eliminates that overhead entirely.
     llm_reasoning_effort: str | None = None
 
-    # StudyLife REST API. One shared instance URL for all users (see
+    # StudyAtrium REST API. One shared instance URL for all users (see
     # docs/decisions.md "M4.5 Multi-user support") — no default, ingestion
     # and /agent fail loudly if unset rather than silently pointing nowhere.
     studylife_api_base_url: str | None = None
     # Path to a CA certificate bundle to trust for `studylife_api_base_url`, in addition to the
-    # system default trust store. Unset by default (local dev: StudyLife runs on a normal
+    # system default trust store. Unset by default (local dev: StudyAtrium runs on a normal
     # publicly-trusted-or-plain-HTTP localhost setup). Set in the k3s deployment, where
-    # studylife-ai reaches StudyLife over cluster-internal HTTPS signed by StudyLife's own
+    # studylife-ai reaches StudyAtrium over cluster-internal HTTPS signed by StudyAtrium's own
     # private cert-manager CA (see k8s/04-app.yaml) - found live: httpx's default trust store
     # (certifi) has no reason to know a private, cluster-only CA.
     studylife_ca_cert_path: str | None = None
     # GDPR audit F-20: before any user content is sent to a model (/chat, /agent,
-    # /agent/confirm, /internal/enrich-capture) this service itself asks StudyLife, with the
+    # /agent/confirm, /internal/enrich-capture) this service itself asks StudyAtrium, with the
     # user's registered AiApiKey, whether that user has an AI consent covering the current
-    # provider (StudyLife answers 403 `ai-consent-required` otherwise) instead of trusting the
+    # provider (StudyAtrium answers 403 `ai-consent-required` otherwise) instead of trusting the
     # caller to have checked. On by default; "false" restores the old trust-the-caller behaviour.
     # Not enforceable while `studylife_api_base_url` is unset (nothing to ask).
     ai_consent_check: bool = True
     # How long a positive consent answer is reused per user, so a chat burst is not one extra
-    # StudyLife round-trip per request. A withdrawal takes effect after at most this long.
+    # StudyAtrium round-trip per request. A withdrawal takes effect after at most this long.
     ai_consent_cache_seconds: float = 30.0
     # LEGACY, audit A5 (2026-08-26): the original single shared secret, used for BOTH
     # verifying per-request proxy tokens (api/identity.py) AND authenticating
@@ -91,19 +91,19 @@ class Settings(BaseSettings):
     # holding this one value could mint a proxy token for ANY user_id *and* administer the
     # registry, with no key-id to support rotation without a simultaneous-redeploy 401 window.
     # Kept as a fallback ONLY: while either new setting is unset, this is used in its place (a
-    # one-time deprecation warning is logged) so StudyLife's backend and studylife-ai can
+    # one-time deprecation warning is logged) so StudyAtrium's backend and studylife-ai can
     # deploy the split independently, in either order - see docs/decisions.md "Split the
     # shared secret (audit A5)". Also still accepted, verbatim, as a legacy 3-part
     # (un-keyed) proxy-token format while it's configured, regardless of whether the new
     # signing secret is also set - same rollout-order reasoning.
     studylife_shared_secret: str | None = None
-    # Verifies per-request proxy tokens StudyLife's backend signs (see api/identity.py,
+    # Verifies per-request proxy tokens StudyAtrium's backend signs (see api/identity.py,
     # docs/decisions.md "M4.5 Multi-user support" - "Auth flow, take two", and "Split the
     # shared secret (audit A5)"). One or more comma-separated `kid:secret` entries, e.g.
     # `v1:abc...,v2:def...` - every entry is a valid verification key (looked up by the `kid`
     # embedded in the token, `{user_id}.{expiry}.{kid}.{sig}`), so an older `kid` can still be
-    # verified while StudyLife's backend has already rotated to signing with a newer one.
-    # StudyLife's own `StudyLifeAi:TokenSigningSecret` always SIGNS with the first entry - this
+    # verified while StudyAtrium's backend has already rotated to signing with a newer one.
+    # StudyAtrium's own `StudyLifeAi:TokenSigningSecret` always SIGNS with the first entry - this
     # side just needs every currently-valid entry to be listed here too. No default: falls
     # back to `studylife_shared_secret` (legacy, un-keyed 3-part format) while unset.
     studylife_token_signing_secret: str | None = None
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     # than the signed-token scheme above, since these aren't per-user requests). May itself be
     # a comma-separated list of ACCEPTED values (unlike the signing secret above, there's no
     # key-id here - it's a plain static bearer) - rotate by listing both the old and the new
-    # value here while StudyLife's backend (which always sends only the first value configured
+    # value here while StudyAtrium's backend (which always sends only the first value configured
     # on its own `StudyLifeAi:InternalApiSecret`) is switched over, then drop the old one. No
     # default: falls back to `studylife_shared_secret` (legacy) while unset.
     studylife_internal_api_secret: str | None = None
@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # "Ingestion scope expansion"). ~5 years, measured from "now" every sync
     # run - it IS a rolling window: a session older than this eventually
     # falls out of it and gets deleted from the Qdrant index (indistinguishable
-    # from a session that was actually deleted in StudyLife), not just
+    # from a session that was actually deleted in StudyAtrium), not just
     # excluded from a one-time fetch. Acceptable for a personal RAG index
     # (5-year-old sessions have little retrieval value anyway), but worth
     # knowing before ever lowering this value, which purges the difference
@@ -251,7 +251,7 @@ class Settings(BaseSettings):
     # that decision). Set to "openai/gpt-4o-mini" in .env.
     eval_judge_model: str | None = None
     # Fixed Qdrant partition the eval pipeline reads/writes under (fixture
-    # seeding + real dev-corpus runs) - decoupled from any real StudyLife
+    # seeding + real dev-corpus runs) - decoupled from any real StudyAtrium
     # user id, since eval doesn't go through the per-request identity flow
     # /chat and /agent use.
     eval_user_id: str = "eval-user"
@@ -276,7 +276,7 @@ class Settings(BaseSettings):
     agent_checkpoint_cleanup_interval_seconds: int = 3600
 
     # M4.5 (see docs/decisions.md "M4.5 Multi-user support"): SQLite file
-    # backing the per-user AiApiKey registry - populated by StudyLife's
+    # backing the per-user AiApiKey registry - populated by StudyAtrium's
     # POST /internal/register-key/revoke-key calls, read by /agent (to build
     # a real StudyLifeClient for the calling user) and by ingestion's
     # sync_all() (which syncs every registered user, replacing the earlier
@@ -286,8 +286,8 @@ class Settings(BaseSettings):
     # Fernet key (32 url-safe base64-encoded bytes, e.g. via
     # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
     # encrypting each registered AiApiKey at rest in registered_keys_db_path (audit finding A4,
-    # 2026-08-25) - every row there is a full, usable StudyLife account credential (unlike
-    # StudyLife's own hash-only key storage), so plaintext SQLite storage was a real exposure.
+    # 2026-08-25) - every row there is a full, usable StudyAtrium account credential (unlike
+    # StudyAtrium's own hash-only key storage), so plaintext SQLite storage was a real exposure.
     # No default on purpose: RegisteredKeyStore.__init__ fails loudly at startup (both the app's
     # lifespan and ingestion's sync_all() entrypoint) if this is missing or not a valid Fernet
     # key, same "fail loud rather than silently point nowhere" convention as
@@ -327,14 +327,14 @@ class Settings(BaseSettings):
     # second FastAPI app (only /internal/*) listens on, via a second uvicorn.Server task in
     # main.py's lifespan - not a second process/container. /internal/* is ALSO still served on
     # the main port for one transition release (main.py logs a deprecation warning each time
-    # that path is actually hit) so StudyLife's backend keeps working unchanged regardless of
+    # that path is actually hit) so StudyAtrium's backend keeps working unchanged regardless of
     # which port it's configured to call, or which side of the split deploys first.
     internal_api_port: int = 8001
 
-    # TLS for the StudyLife -> studylife-ai hop (see tls.py and README.md "TLS"). When both
+    # TLS for the StudyAtrium -> studylife-ai hop (see tls.py and README.md "TLS"). When both
     # files are set, the process additionally serves the public routes over HTTPS on `tls_port`
     # and /internal/* over HTTPS on `internal_api_tls_port`, with this PEM certificate/key pair
-    # (in the cluster: a cert-manager Certificate issued by StudyLife's internal CA, see
+    # (in the cluster: a cert-manager Certificate issued by StudyAtrium's internal CA, see
     # k8s/04-app.yaml). Setting only one of the two is a startup error, and so is a file that
     # cannot be loaded: the service never silently falls back to plain HTTP when TLS was asked
     # for. The plain ports above stay up for the kubelet probes and Prometheus. The shipped k8s

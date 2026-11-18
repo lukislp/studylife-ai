@@ -118,7 +118,7 @@ def _catalog_course_names(messages: list[BaseMessage]) -> dict[int, str]:
     call already made earlier in this turn (if any) - so the human-confirmation display can
     show the server's own course name instead of whatever the model typed into a write tool's
     `course_name` argument, which the model can get wrong (see docs/decisions.md "Agent
-    confirmation shows the real course name"). Purely a display correction: StudyLife's API
+    confirmation shows the real course name"). Purely a display correction: StudyAtrium's API
     ignores `create_study_session`'s `course_name` field entirely and derives the real name
     from `course_id` server-side (see docs/decisions.md "F15/O6-ai phase B"), so this never
     changes what actually gets created - only what the user is shown before approving it.
@@ -245,7 +245,7 @@ async def run_agent(
         # The model has no other way to know "today" - without this, relative
         # dates ("morgen", "nächste Woche") get resolved against training data
         # instead of the real current date (confirmed live: "morgen" became a
-        # date in 2023). Local time, not UTC - matches StudyLife's own sessions,
+        # date in 2023). Local time, not UTC - matches StudyAtrium's own sessions,
         # which store naive local timestamps (see docs/decisions.md), in Settings.timezone.
         timezone = get_settings().timezone
         zone = f" ({timezone})" if timezone else ""

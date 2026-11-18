@@ -1,4 +1,4 @@
-"""Periodic ingestion sync: keeps Qdrant in step with StudyLife's own data
+"""Periodic ingestion sync: keeps Qdrant in step with StudyAtrium's own data
 without a separate CronJob or a manually-run `python -m studylife_ai.ingestion`
 (see docs/decisions.md "Periodic ingestion sync" for why an in-process loop
 was chosen over a CronJob at a 60s interval, and why a full sync_all() every
