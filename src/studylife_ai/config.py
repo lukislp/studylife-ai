@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     # private cert-manager CA (see k8s/04-app.yaml) - found live: httpx's default trust store
     # (certifi) has no reason to know a private, cluster-only CA.
     studylife_ca_cert_path: str | None = None
+    # GDPR audit F-20: before any user content is sent to a model (/chat, /agent,
+    # /agent/confirm, /internal/enrich-capture) this service itself asks StudyLife, with the
+    # user's registered AiApiKey, whether that user has an AI consent covering the current
+    # provider (StudyLife answers 403 `ai-consent-required` otherwise) instead of trusting the
+    # caller to have checked. On by default; "false" restores the old trust-the-caller behaviour.
+    # Not enforceable while `studylife_api_base_url` is unset (nothing to ask).
+    ai_consent_check: bool = True
+    # How long a positive consent answer is reused per user, so a chat burst is not one extra
+    # StudyLife round-trip per request. A withdrawal takes effect after at most this long.
+    ai_consent_cache_seconds: float = 30.0
     # LEGACY, audit A5 (2026-08-26): the original single shared secret, used for BOTH
     # verifying per-request proxy tokens (api/identity.py) AND authenticating
     # /internal/register-key /revoke-key /enrich-capture (api/internal.py) - split into

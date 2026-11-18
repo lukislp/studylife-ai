@@ -106,10 +106,10 @@ def _parse_order(response: str, num_candidates: int) -> list[int]:
     if response.strip() and len(seen) < num_candidates / 2:
         logger.warning(
             "Reranker recognized only %d/%d candidate indices in its response "
-            "(possible indexing mismatch): %r",
+            "(possible indexing mismatch, response length %d chars)",
             len(seen),
             num_candidates,
-            response,
+            len(response),
         )
     order.extend(i for i in range(num_candidates) if i not in seen)
     return order

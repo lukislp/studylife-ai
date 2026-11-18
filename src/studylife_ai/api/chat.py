@@ -24,6 +24,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from studylife_ai.api.consent import require_ai_consent
 from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
 from studylife_ai.api.rate_limit import enforce_rate_limit
 from studylife_ai.config import Settings, get_settings
@@ -147,7 +148,7 @@ async def _sse_event_stream(
     yield "data: [DONE]\n\n"
 
 
-@router.post("/chat", dependencies=[Depends(enforce_rate_limit)])
+@router.post("/chat", dependencies=[Depends(enforce_rate_limit), Depends(require_ai_consent)])
 async def chat(
     request: ChatRequest,
     http_request: Request,
