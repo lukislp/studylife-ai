@@ -834,6 +834,14 @@ All of the following were found live, against the real deployment, after M5 itse
 - **Alternatives rejected**: a `/health` extension (health is unauthenticated and must stay minimal); a public endpoint (the model names are operational detail, and consent is enforced by StudyLife's backend, which is the only caller); reporting the raw env values (would leak the base URL and any credentials embedded in it); per-role declarations (no case where only some models are local and the consent question is still "no").
 - **Compatibility**: purely additive. StudyLife versions that do not call it are unaffected, and a StudyLife that calls it against an older service sees a 404 and must treat the provider as unknown.
 
+### 2026-11-18 - Server-side AI consent gate (GDPR audit F-20) **[owner: assistant]**
+
+- **Why**: StudyLife's backend checks the user's AI consent before it proxies to this service, but this service is the one that sends user content to a model, and `/internal/enrich-capture` (called by StudyLife's background worker) had no consent check of its own on this side.
+- **Decision**: `studylife/consent.py::ensure_ai_consent` asks StudyLife itself with the user's registered `AiApiKey` (`GET /api/courses`, body ignored); StudyLife already answers every AI-key request with 403 `ai-consent-required` while no consent covers the current provider (the signal ingestion treats as a pause). It guards `/chat`, `/agent`, `/agent/confirm` (dependency `api/consent.py::require_ai_consent`) and `/internal/enrich-capture` (explicit call, the user id comes from the body). 403 without consent, 503 when consent cannot be established (no registered key, key rejected, StudyLife unreachable): fail closed, nothing is sent to a model.
+- **Cache**: a positive answer is reused per user for `AI_CONSENT_CACHE_SECONDS` (30 s) so a chat burst is not one extra round-trip per request; refusals are never cached and `/internal/revoke-key` drops the entry. A withdrawal therefore takes effect after at most 30 s.
+- **Alternatives rejected**: a consent flag in the signed proxy token (cannot cover the internal enrich route, and a stale token would outlive a withdrawal); a new StudyLife endpoint (needs a coordinated server release, the existing 403 signal already exists).
+- **Compatibility**: no StudyLife change required. `AI_CONSENT_CHECK=false` restores the old behaviour; the gate is skipped while `STUDYLIFE_API_BASE_URL` is unset. A user with consent but without a registered key is now refused (503) on the routes above; registration happens when the user generates the AI key, which `/chat` retrieval depended on anyway.
+- **Also**: the reranker's "recognized only N/M indices" warning no longer logs the raw model response (it can echo user note content), only its length.
 ## Dependency security advisories
 
 ### 2026-09-15 — Dependabot alerts #1 (`diskcache`) and #2 (`ragas`) dismissed as tolerable risk, not fixed **[owner: user]**

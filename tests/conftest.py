@@ -54,6 +54,15 @@ def _reset_legacy_signing_fallback_warning() -> None:
     identity._warned_legacy_signing_fallback = False
 
 
+@pytest.fixture(autouse=True)
+def _reset_consent_cache() -> None:
+    """studylife.consent._allowed_until is process-lifetime state, same leak-between-tests
+    reasoning as the fixtures above."""
+    from studylife_ai.studylife.consent import forget_consent
+
+    forget_consent()
+
+
 def make_proxy_token(
     user_id: str, *, secret: str = TEST_SHARED_SECRET, expires_in: int = 60
 ) -> str:
@@ -75,8 +84,16 @@ async def client(monkeypatch: MonkeyPatch) -> AsyncIterator[AsyncClient]:
     # depend on whatever STUDYLIFE_SHARED_SECRET happens to be in the
     # local/CI environment. Tests exercising that specifically override
     # per-test.
-    for module in ("chat", "agent", "identity", "internal", "rate_limit"):
+    for module in ("chat", "agent", "identity", "internal", "rate_limit", "consent"):
         monkeypatch.setattr(f"studylife_ai.api.{module}.get_settings", _fake_get_settings)
+
+    # Default: the AI consent gate (GDPR audit F-20) lets everything through, so the many tests
+    # that are about something else need no StudyLife consent stub. tests/test_consent.py and the
+    # consent cases in test_chat/test_internal swap in a refusing or the real implementation.
+    async def _consent_granted(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("studylife_ai.api.consent.ensure_ai_consent", _consent_granted)
 
     # Default: /internal/register-key's post-response auto-ingestion background task (see
     # docs/decisions.md "Auto-ingestion on register") is a no-op unless a test specifically
