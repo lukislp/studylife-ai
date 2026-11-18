@@ -255,7 +255,7 @@ async def test_enrich_capture_fails_closed_when_consent_is_unverifiable(
 async def test_enrich_capture_asks_studylife_with_the_users_key_end_to_end(
     internal_client: AsyncClient, monkeypatch: MonkeyPatch
 ) -> None:
-    # Real gate (undo the conftest default), StudyLife answers 403 consent-required.
+    # Real gate (undo the conftest default), StudyAtrium answers 403 consent-required.
     monkeypatch.setattr(
         "studylife_ai.api.consent.ensure_ai_consent", consent_module.ensure_ai_consent
     )

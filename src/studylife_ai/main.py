@@ -62,7 +62,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     await registered_key_store.setup()
     app.state.registered_key_store = registered_key_store
 
-    # Keeps Qdrant in step with StudyLife's own data on an ongoing basis (see
+    # Keeps Qdrant in step with StudyAtrium's own data on an ongoing basis (see
     # docs/decisions.md "Periodic ingestion sync") - only started when
     # ingestion is actually configured, same guard as the register-key
     # auto-sync in api/internal.py, so tests/CI without STUDYLIFE_API_BASE_URL
@@ -78,7 +78,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # user-specific (partitioned by thread_id, which itself embeds the
     # owning user_id), and a pending write action must survive a service
     # restart between propose and confirm regardless of whether any
-    # StudyLife credentials are configured at all.
+    # StudyAtrium credentials are configured at all.
     async with AsyncSqliteSaver.from_conn_string(settings.agent_checkpoint_db_path) as checkpointer:
         await checkpointer.setup()
         app.state.agent_checkpointer = checkpointer
@@ -101,7 +101,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         internal_server = build_internal_server(internal_app, settings)
         internal_server_task = asyncio.create_task(serve_internal_app(internal_server))
 
-        # HTTPS listeners for the StudyLife -> studylife-ai hop (tls.py): the same two apps
+        # HTTPS listeners for the StudyAtrium -> studylife-ai hop (tls.py): the same two apps
         # again, on TLS_PORT and INTERNAL_API_TLS_PORT, only when TLS_CERT_FILE/TLS_KEY_FILE
         # are set. A failure here raises, so uvicorn exits instead of running without them.
         tls_servers: list[uvicorn.Server] = []
@@ -160,7 +160,7 @@ def create_app() -> FastAPI:
     # Audit O6-ai phase B (2026-08-26, see docs/decisions.md): /internal/* is no longer included
     # here at all - it moved to internal_server.py's dedicated port for good in phase A, and the
     # transition-period fallback inclusion on this port (with its deprecation-log dependency) is
-    # dropped now that StudyLife's backend calls the dedicated port directly. A request to
+    # dropped now that StudyAtrium's backend calls the dedicated port directly. A request to
     # /internal/* on this port now 404s, same as any other undefined route.
     # HTTP request rate/latency/status per endpoint, exposed at /metrics for Prometheus to
     # scrape (see docs/decisions.md "Metrics dashboard") - on top of the hand-registered LLM

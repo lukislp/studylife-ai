@@ -1,7 +1,7 @@
 # Default-deny in BOTH directions as the baseline (default-deny-ingress and
 # default-deny-egress), with every allowed flow spelled out as its own policy: cluster DNS in
 # allow-dns, the app pod's three outbound dependencies in studylife-ai-egress (Qdrant,
-# StudyLife, the LLM provider over HTTPS), and the inbound paths below. Bootstrap-only, NOT
+# StudyAtrium, the LLM provider over HTTPS), and the inbound paths below. Bootstrap-only, NOT
 # Flux-managed - same RBAC reasoning as k8s/00-namespace.yaml/k8s/02-secret.yaml
 # (kustomize-controller's ClusterRole has no "networkpolicies" permission).
 apiVersion: networking.k8s.io/v1
@@ -50,7 +50,7 @@ spec:
           podSelector: { matchLabels: { app: studylife-web } }
       ports:
         - { protocol: TCP, port: 8000 }
-        # HTTPS listener for the same routes (tls.py, TLS_PORT) - the port StudyLife's
+        # HTTPS listener for the same routes (tls.py, TLS_PORT) - the port StudyAtrium's
         # StudyLifeAi__BaseUrl uses once it calls over TLS. 8000 stays allowed until that
         # switch is live everywhere and can be dropped afterwards.
         - { protocol: TCP, port: 8443 }
@@ -123,7 +123,7 @@ spec:
 #
 #  1. Qdrant in this same namespace (QDRANT_URL = http://qdrant:6333, k8s/01-config.yaml) -
 #     every ingestion write and every RAG retrieval goes here (ingestion/qdrant_store.py).
-#  2. StudyLife itself (STUDYLIFE_API_BASE_URL =
+#  2. StudyAtrium itself (STUDYLIFE_API_BASE_URL =
 #     https://studylife-web.studylife-scale.svc.cluster.local) - the periodic sync job
 #     (ingestion/sync.py, visible in this pod's logs as "Sync[note]/[course]/[session]...")
 #     and the agent's tool calls (api/agent.py). NetworkPolicy matches the POD port, not the

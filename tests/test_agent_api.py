@@ -285,7 +285,7 @@ async def test_agent_confirm_tool_failure_returns_502_and_invalidates_thread(
     fake_studylife = await _install_fake_agent(
         monkeypatch, [propose, AIMessage(content="unused - tool raises before this")]
     )
-    fake_studylife.create_session.side_effect = RuntimeError("StudyLife API rejected the request")
+    fake_studylife.create_session.side_effect = RuntimeError("StudyAtrium API rejected the request")
 
     propose_response = await client.post(
         "/agent", json={"message": "leg mir eine Session für Lineare Algebra an"}

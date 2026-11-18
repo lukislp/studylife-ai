@@ -1,4 +1,4 @@
-"""Optional HTTPS listeners for the StudyLife -> studylife-ai hop.
+"""Optional HTTPS listeners for the StudyAtrium -> studylife-ai hop.
 
 StudyLife's backend calls this service with a shared secret or a short-lived HMAC token, so the
 hop has to be encrypted (OpenSSF `crypto_used_network`, StudyLife's docs/SECURITY-ASSURANCE.md

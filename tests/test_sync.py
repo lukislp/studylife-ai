@@ -625,7 +625,7 @@ async def test_sync_all_purges_exactly_once_after_reaching_the_401_threshold(
     assert any("purging as a zombie registration" in record.message for record in caplog.records)
 
 
-# --- AI consent pause: StudyLife answers 403 `ai-consent-required` while the user has no
+# --- AI consent pause: StudyAtrium answers 403 `ai-consent-required` while the user has no
 # consent covering the current provider (see CONSENT_REQUIRED_PROBLEM in ingestion/sync.py) ---
 
 

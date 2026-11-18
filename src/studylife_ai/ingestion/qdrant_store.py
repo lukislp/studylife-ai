@@ -39,7 +39,7 @@ class EntityChunkMetadata:
     session_id: int | None
     user_id: str
     fingerprint: str
-    # ISO 8601 (naive local time, matching StudyLife's own session timestamps
+    # ISO 8601 (naive local time, matching StudyAtrium's own session timestamps
     # - see docs/decisions.md), set only for content_type="session". None for
     # every other content type.
     session_start: str | None

@@ -6,7 +6,7 @@ LLM call, and immediately embeds the capture itself into Qdrant instead of waiti
 periodic sync. Same "never raises, degrade to a safe default" contract as rag/rerank.py and
 rag/date_parse.py - a bad LLM response or an unreachable Qdrant must not fail the enrichment
 call, since the note it's enriching has already been created by the time this runs (called from
-api/internal.py's /internal/enrich-capture, itself triggered by StudyLife's own background task,
+api/internal.py's /internal/enrich-capture, itself triggered by StudyAtrium's own background task,
 not synchronously from the extension's save request - see StudyLife.Server's
 BackgroundTaskService.CaptureEnrichment.cs).
 """

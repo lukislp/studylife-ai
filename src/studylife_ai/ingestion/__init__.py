@@ -1,1 +1,1 @@
-"""Note ingestion: fetch from StudyLife, chunk, embed, sync into Qdrant."""
+"""Note ingestion: fetch from StudyAtrium, chunk, embed, sync into Qdrant."""

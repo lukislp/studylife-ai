@@ -102,7 +102,7 @@ async def _sse_event_stream(
     # Without this, the model has no way to know "today" and answers relative-date questions
     # ("what's on today/this week") against training data instead - same fix, same reasoning,
     # as api/agent.py's identical injection (found live: /chat asserted a specific "today" that
-    # was months off). Local time, not UTC - matches StudyLife's own sessions, which store naive
+    # was months off). Local time, not UTC - matches StudyAtrium's own sessions, which store naive
     # local timestamps (see docs/decisions.md).
     now = datetime.now()
     this_week = week_bounds(now.date(), weeks_ago=0)
