@@ -5,7 +5,7 @@ providers with JSON mode.
 
 This is the escalation path named and deferred in docs/decisions.md "Structured session dates"
 (option (2), "full NL date-range resolution"). The fixed ±SESSION_WINDOW_DAYS window plus
-rag/rerank.py's `_relative_day_label()` only give single-day relative labels (e.g. "[3 days
+rag/rerank.py's `relative_day_label()` only give single-day relative labels (e.g. "[3 days
 ago]") - there is no week/month/range-level framing anywhere in the pipeline, so a question like
 "letzte Woche" requires some downstream LLM to infer "a chunk labeled [3 days ago] falls inside
 the range called 'last week'", which proved unreliable live (see docs/decisions.md "NL
@@ -84,7 +84,7 @@ def week_bounds(today: date, *, weeks_ago: int) -> DateRange:
 def _resolve_named_range(token: str, *, today: date) -> DateRange | None:
     """Deterministically computes the real calendar boundaries for a category the model only
     had to *classify*, never calculate - same "don't trust the LLM with date arithmetic"
-    philosophy as rerank.py's `_relative_day_label()`. Live testing found the LLM's own
+    philosophy as rerank.py's `relative_day_label()`. Live testing found the LLM's own
     "Monday-Sunday week" boundary math unreliable (off by ~2 days) even when the prompt already
     spelled out the convention explicitly - the fix isn't clearer wording, it's not asking the
     LLM to do the arithmetic at all (see docs/decisions.md "NL date-range resolution: LLM

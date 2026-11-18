@@ -177,3 +177,74 @@ async def test_save_note_calls_client_and_returns_id_and_title() -> None:
         title="Zusammenfassung", content="Kurze Zusammenfassung.", course_id=6
     )
     assert result == {"id": 55, "title": "Zusammenfassung"}
+
+
+# --- list_notes / list_sessions: enumeration from the live API (rag/listing.py) ---
+
+
+def _studylife_with_listing_data() -> AsyncMock:
+    fake = AsyncMock()
+    fake.get_courses.return_value = [
+        CourseDto(id=1, name="Cloud Computing", code="INF350"),
+        CourseDto(id=2, name="Analysis", code="MATH201"),
+    ]
+    fake.get_notes.return_value = [
+        StudyLifeNote(
+            id=10,
+            title="Older note",
+            content="IaaS",
+            created_at=datetime(2026, 10, 1),
+            updated_at=datetime(2026, 10, 1),
+            course_id=1,
+        ),
+        StudyLifeNote(
+            id=11,
+            title="Fresh capture",
+            content="Serverless",
+            created_at=datetime(2026, 11, 18, 13, 55),
+            updated_at=datetime(2026, 11, 18, 13, 55),
+            course_id=1,
+        ),
+        StudyLifeNote(
+            id=12,
+            title="Analysis note",
+            content="Integrale",
+            created_at=datetime(2026, 11, 18, 13, 58),
+            updated_at=datetime(2026, 11, 18, 13, 58),
+            course_id=2,
+        ),
+    ]
+    fake.get_sessions_history.return_value = [
+        StudySessionDto(
+            id=20,
+            course_id=1,
+            course_name="Cloud Computing",
+            start_time=datetime(2020, 10, 22, 10),
+            end_time=datetime(2020, 10, 22, 12),
+            topic="Literaturrecherche",
+        )
+    ]
+    return fake
+
+
+async def test_list_notes_filters_by_course_newest_first() -> None:
+    tool = _tools_with(studylife=_studylife_with_listing_data())["list_notes"]
+
+    result = await tool.ainvoke({"course": "cloud computing"})
+
+    assert "not instructions" in result
+    assert result.index("[1] Note: Fresh capture") < result.index("[2] Note: Older note")
+    assert "Analysis note" not in result
+
+
+async def test_list_sessions_never_lists_a_past_session_as_planned() -> None:
+    fake = _studylife_with_listing_data()
+    tools = _tools_with(studylife=fake)
+
+    upcoming = await tools["list_sessions"].ainvoke({"course": "Cloud Computing"})
+    everything = await tools["list_sessions"].ainvoke({"course": "Cloud Computing", "when": "all"})
+
+    assert "(no matching records" in upcoming
+    assert "(past, not completed)" in everything
+    assert "(planned)" not in everything
+    fake.get_sessions_history.assert_awaited_with(days=1825, only_completed=False)

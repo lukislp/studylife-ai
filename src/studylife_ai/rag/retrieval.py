@@ -24,6 +24,7 @@ from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import get_args
 
+from studylife_ai.clock import local_now
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import ContentType, QdrantStore, RetrievedChunk
 from studylife_ai.llm.embeddings import embed_texts
@@ -213,7 +214,7 @@ async def retrieve_with_rerank(
     sorted by vector-similarity score. Either way, the final list is cut
     down to `settings.retrieval_top_k`.
     """
-    today = datetime.now().date()
+    today = local_now(settings.timezone).date()
     vectors = await embed_texts(
         [query], model=settings.embedding_model, call_site="retrieval", user_id=user_id
     )

@@ -1,7 +1,8 @@
 """Describes which AI providers and models this instance sends user data to.
 
 Pure functions only: the description is derived in this one place from the configured LiteLLM
-model strings (`llm_model`, `embedding_model`, `rerank_model`, `date_parse_model`) and exposed by
+model strings (`llm_model`, `embedding_model`, `rerank_model`, `date_parse_model`,
+`listing_intent_model`) and exposed by
 `GET /internal/provider-info` (see api/internal.py). StudyLife's backend uses it to decide
 whether a user must give explicit consent before their notes and study data are processed
 (docs/decisions.md "Provider description endpoint").
@@ -71,5 +72,11 @@ def describe_providers(settings: Settings) -> ProviderInfoResponse:
     if settings.date_parse_model:
         roles.append(
             describe_role("date_parse", settings.date_parse_model, declared_local=declared)
+        )
+    # Only an explicit override is its own role: by default the listing classifier IS the
+    # date_parse model (Settings.effective_listing_intent_model), already described above.
+    if settings.structured_listings and settings.listing_intent_model:
+        roles.append(
+            describe_role("listing_intent", settings.listing_intent_model, declared_local=declared)
         )
     return ProviderInfoResponse(roles=roles, any_external=any(not r.local for r in roles))

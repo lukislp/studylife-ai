@@ -16,6 +16,7 @@ unchanged - one seeding path, not a parallel one that could drift from real
 ingestion's actual behavior.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -31,7 +32,12 @@ from studylife_ai.ingestion.sync import (
     sync_content_type,
 )
 from studylife_ai.llm.embeddings import embed_texts
-from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudySessionDto
+from studylife_ai.studylife.models import (
+    CourseDto,
+    CourseGoalDto,
+    StudyLifeNote,
+    StudySessionDto,
+)
 
 DEFAULT_NOTES_PATH = Path("eval/fixture_notes.jsonl")
 DEFAULT_COURSES_PATH = Path("eval/fixture_courses.jsonl")
@@ -44,6 +50,47 @@ class FixtureNote(BaseModel):
     title: str
     content: str
     course_id: int | None = None
+    # Only structured listings read this ("newest note first"); the default keeps the older
+    # fixture lines valid without inventing a date for each of them.
+    created_at: datetime = datetime(2026, 8, 1, 10, 0)
+
+    def to_studylife_note(self) -> StudyLifeNote:
+        return StudyLifeNote(
+            id=self.id,
+            title=self.title,
+            content=self.content,
+            course_id=self.course_id,
+            created_at=self.created_at,
+            updated_at=self.created_at,
+        )
+
+
+class FixtureDataSource:
+    """The eval's stand-in for the StudyLife API (rag/listing.py's `StudyDataSource`), over the
+    same fixture files that are seeded into Qdrant - so structured listings and retrieval see
+    one and the same corpus, as they do in production."""
+
+    def __init__(
+        self,
+        *,
+        notes: list[FixtureNote],
+        courses: list[CourseDto],
+        sessions: list[StudySessionDto],
+    ) -> None:
+        self._notes = notes
+        self._courses = courses
+        self._sessions = sessions
+
+    async def get_notes(self) -> list[StudyLifeNote]:
+        return [note.to_studylife_note() for note in self._notes]
+
+    async def get_courses(self) -> list[CourseDto]:
+        return list(self._courses)
+
+    async def get_sessions_history(
+        self, *, days: int, only_completed: bool
+    ) -> list[StudySessionDto]:
+        return [s for s in self._sessions if s.is_completed or not only_completed]
 
 
 def load_fixture_notes(path: Path = DEFAULT_NOTES_PATH) -> list[FixtureNote]:

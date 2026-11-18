@@ -15,8 +15,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from studylife_ai.config import Settings
 
-# Only the two write tools pause for confirmation - read tools (list_courses,
-# search_notes) execute immediately, they have no side effects to confirm.
+# Only the two write tools pause for confirmation - read tools (list_courses, list_notes,
+# list_sessions, search_notes) execute immediately, they have no side effects to confirm.
 _WRITE_TOOLS = {"create_study_session", "save_note"}
 
 

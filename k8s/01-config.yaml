@@ -69,6 +69,15 @@ data:
   RERANK_MODEL: "openai/gpt-5.6-luna"
   RERANK_REASONING_EFFORT: "medium"
   DATE_PARSE_MODEL: "openai/gpt-4o"
+  # Enumeration questions ("which notes do I have in course X") are answered from a structured
+  # listing of the live StudyLife API, not similarity search - see docs/decisions.md
+  # "Structured listings for enumeration questions". The classifier runs on DATE_PARSE_MODEL
+  # above; LISTING_INTENT_MODEL is deliberately NOT set: it would add a "listing_intent" role to
+  # /internal/provider-info, which changes StudyLife's consent fingerprint and makes every user
+  # agree to AI processing again.
+  # The pod's own clock is UTC; StudyLife's server image sets TZ=Europe/Berlin and stores naive
+  # local timestamps, so "today" has to be computed in that zone.
+  TIMEZONE: "Europe/Berlin"
 
   REGISTERED_KEYS_DB_PATH: "/app/data/registered_keys.db"
   AGENT_CHECKPOINT_DB_PATH: "/app/data/agent_checkpoints.db"

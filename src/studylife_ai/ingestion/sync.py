@@ -95,9 +95,15 @@ def fingerprint_note(note: StudyLifeNote) -> str:
     wasn't bumped. Hashes title+content+is_markdown (not just content) since a
     title-only edit should still refresh stored metadata, and toggling
     Markdown mode changes render_note()'s output even when the raw content
-    text itself doesn't change.
+    text itself doesn't change. Includes course_id too: it is stored in the
+    chunk payload and cited as the note's course, so moving a note to another
+    course (or a capture whose AI-suggested course the user changed - see
+    rag/enrichment.py's _ingest_note) must refresh it; before, the payload kept
+    the first course it was indexed with forever.
     """
-    digest = hashlib.sha256(f"{note.title}\n{note.content}\n{note.is_markdown}".encode())
+    digest = hashlib.sha256(
+        f"{note.title}\n{note.content}\n{note.is_markdown}\n{note.course_id}".encode()
+    )
     return digest.hexdigest()
 
 

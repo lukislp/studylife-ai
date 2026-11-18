@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -174,6 +175,28 @@ class Settings(BaseSettings):
     # large ranges are a known, flagged soft edge (see docs/decisions.md), not solved here.
     date_range_chunk_cap: int = 60
 
+    # Structured listings (see docs/decisions.md "Structured listings for enumeration
+    # questions"): /chat first asks a model whether the question enumerates notes or sessions
+    # ("which notes do I have in course X", "my newest note", "what's on this week"). If it
+    # does, the answer is built from the live StudyLife API (filtered by the item's own
+    # course_id, sorted by date) instead of vector similarity, which can neither filter by course
+    # nor rank by recency. The classifier is the query-understanding model date_parse_model by
+    # default - the same model and provider already disclosed to users for that role, so turning
+    # this on does not change GET /internal/provider-info and does not invalidate every user's AI
+    # consent (StudyLife fingerprints the role list). listing_intent_model overrides it and is
+    # then disclosed as its own "listing_intent" role. Neither set, or structured_listings off =
+    # retrieval for every question, as before.
+    structured_listings: bool = True
+    listing_intent_model: str | None = None
+    # Upper bound on items one structured listing hands to the answering model; the prompt states
+    # how many more exist, so a cut is never silent.
+    listing_max_items: int = 25
+
+    # IANA time zone (e.g. "Europe/Berlin") that "now"/"today" are computed in for prompts and
+    # listings. StudyLife stores naive local timestamps, so this should be the zone StudyLife
+    # itself runs in. Unset = this process's local time (the previous behavior).
+    timezone: str | None = None
+
     # LiteLLM embedding model identifier, same provider-agnostic convention
     # as llm_model. Defaults to a local Ollama embedding model.
     embedding_model: str = "ollama/nomic-embed-text"
@@ -329,6 +352,23 @@ class Settings(BaseSettings):
     def _tls_files_set_together(self) -> "Settings":
         if bool(self.tls_cert_file) != bool(self.tls_key_file):
             raise ValueError("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+        return self
+
+    @property
+    def effective_listing_intent_model(self) -> str | None:
+        """The model that classifies listing questions, or None when listings are off."""
+        if not self.structured_listings:
+            return None
+        return self.listing_intent_model or self.date_parse_model
+
+    @model_validator(mode="after")
+    def _timezone_is_known(self) -> "Settings":
+        """Fails at startup, not on the first chat request, for a typo like "Europe/Berlinn"."""
+        if self.timezone:
+            try:
+                ZoneInfo(self.timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"TIMEZONE {self.timezone!r} is not a known IANA zone") from exc
         return self
 
     # Capture enrichment (studylife-capture browser extension, see docs/decisions.md "Capture

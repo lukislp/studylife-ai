@@ -1,5 +1,5 @@
-"""RAGAS eval runner: replays eval/dataset.jsonl through the real RAG
-pipeline (retrieval + prompt + generation) and scores it.
+"""RAGAS eval runner: replays eval/dataset.jsonl through the real chat
+pipeline (context building as in /chat + generation) and scores it.
 
 Judge model is separate from the answer-generation model (docs/decisions.md
 "Eval design") - a stronger, independent model is required for trustworthy
@@ -8,7 +8,6 @@ the provider choice is deliberately not made yet.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 
 import litellm
 import pandas as pd
@@ -20,11 +19,14 @@ from ragas.llms.base import BaseRagasLLM, LangchainLLMWrapper
 from ragas.metrics import AnswerRelevancy, Faithfulness, LLMContextPrecisionWithoutReference
 from ragas.run_config import RunConfig
 
+from studylife_ai.clock import local_now
 from studylife_ai.config import Settings
 from studylife_ai.eval.dataset import EvalCase
-from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
+from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.llm.client import stream_chat_completion
-from studylife_ai.rag.prompt import build_context_system_message
+from studylife_ai.rag.chat_context import ChatContext, build_chat_context
+from studylife_ai.rag.listing import StudyDataSource
+from studylife_ai.rag.prompt import current_date_message
 from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.schemas.chat import ChatMessage
 
@@ -47,9 +49,32 @@ class NoteMatchResult:
 
 
 @dataclass
+class AnswerTermResult:
+    """Deterministic answer check (see EvalCase.required/forbidden_answer_terms)."""
+
+    case_id: str
+    missing_terms: set[str]
+    forbidden_terms_found: set[str]
+
+    @property
+    def passed(self) -> bool:
+        return not self.missing_terms and not self.forbidden_terms_found
+
+
+def check_answer_terms(case: EvalCase, answer: str) -> AnswerTermResult:
+    text = answer.casefold()
+    return AnswerTermResult(
+        case_id=case.id,
+        missing_terms={t for t in case.required_answer_terms if t.casefold() not in text},
+        forbidden_terms_found={t for t in case.forbidden_answer_terms if t.casefold() in text},
+    )
+
+
+@dataclass
 class EvalReport:
     ragas_scores: pd.DataFrame
     note_matches: list[NoteMatchResult] = field(default_factory=list)
+    answer_terms: list[AnswerTermResult] = field(default_factory=list)
 
     @property
     def note_match_rate(self) -> float:
@@ -59,18 +84,31 @@ class EvalReport:
 
 
 async def _generate_answer(
-    question: str, settings: Settings, store: QdrantStore
-) -> tuple[str, list[RetrievedChunk]]:
-    """Same retrieval + prompt-construction + generation as /chat, but returns
-    the full joined answer instead of an SSE stream."""
-    chunks = await retrieve_with_rerank(
-        question, store=store, settings=settings, user_id=settings.eval_user_id
+    question: str,
+    settings: Settings,
+    store: QdrantStore,
+    source: StudyDataSource | None = None,
+) -> tuple[str, ChatContext]:
+    """Same context building (rag/chat_context.py) + generation as /chat, but returns
+    the full joined answer instead of an SSE stream. `source` stands in for the StudyLife API
+    (the fixture corpus in CI); `None` means retrieval only, like /chat without a key."""
+    now = local_now(settings.timezone)
+    context = await build_chat_context(
+        question,
+        retrieve=lambda: retrieve_with_rerank(
+            question, store=store, settings=settings, user_id=settings.eval_user_id
+        ),
+        source=source,
+        settings=settings,
+        now=now,
+        user_id=settings.eval_user_id,
     )
-    context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
+    context_message = ChatMessage(role="system", content=context.system_message)
     # Matches /chat's own current-date injection (see api/chat.py) - keeps eval's generation
     # faithful to what /chat actually does, rather than silently diverging from it.
-    now = datetime.now().strftime("%Y-%m-%d %H:%M, %A")
-    date_message = ChatMessage(role="system", content=f"The current date and time is {now}.")
+    date_message = ChatMessage(
+        role="system", content=current_date_message(now, timezone=settings.timezone)
+    )
     messages = [context_message, date_message, ChatMessage(role="user", content=question)]
     deltas = [
         delta
@@ -83,7 +121,7 @@ async def _generate_answer(
             user_id=settings.eval_user_id,
         )
     ]
-    return "".join(deltas), chunks
+    return "".join(deltas), context
 
 
 class _JudgeEmbeddings(BaseRagasEmbeddings):
@@ -169,27 +207,35 @@ def _build_judge(settings: Settings) -> tuple[BaseRagasLLM, BaseRagasEmbeddings]
     return judge_llm, judge_embeddings
 
 
-async def run_eval(cases: list[EvalCase], *, settings: Settings, store: QdrantStore) -> EvalReport:
+async def run_eval(
+    cases: list[EvalCase],
+    *,
+    settings: Settings,
+    store: QdrantStore,
+    source: StudyDataSource | None = None,
+) -> EvalReport:
     judge_llm, judge_embeddings = _build_judge(settings)
 
     samples: list[SingleTurnSample | MultiTurnSample] = []
     note_matches: list[NoteMatchResult] = []
+    answer_terms: list[AnswerTermResult] = []
     for case in cases:
-        answer, chunks = await _generate_answer(case.question, settings, store)
+        answer, context = await _generate_answer(case.question, settings, store, source)
         samples.append(
             SingleTurnSample(
                 user_input=case.question,
                 response=answer,
-                retrieved_contexts=[chunk.content for chunk in chunks],
+                retrieved_contexts=context.contexts,
             )
         )
         note_matches.append(
             NoteMatchResult(
                 case_id=case.id,
                 expected_titles=set(case.expected_titles),
-                retrieved_titles={chunk.title for chunk in chunks},
+                retrieved_titles={s.title for s in context.sources},
             )
         )
+        answer_terms.append(check_answer_terms(case, answer))
 
     dataset = EvaluationDataset(samples=samples)
     result = evaluate(
@@ -215,4 +261,6 @@ async def run_eval(cases: list[EvalCase], *, settings: Settings, store: QdrantSt
     # evaluate() is typed to also allow an Executor, but that only happens when
     # return_executor=True is passed - we never do, so this is always an EvaluationResult.
     assert isinstance(result, EvaluationResult)
-    return EvalReport(ragas_scores=result.to_pandas(), note_matches=note_matches)
+    return EvalReport(
+        ragas_scores=result.to_pandas(), note_matches=note_matches, answer_terms=answer_terms
+    )
