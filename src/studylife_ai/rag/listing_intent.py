@@ -10,6 +10,12 @@ Same split as rag/date_parse.py: the LLM only classifies (kind, course words, ti
 plain-text one-line format that small local models can follow; every filter, sort and date
 boundary is computed in Python afterwards. Never raises - any failure means "no listing", and
 the caller falls back to normal retrieval.
+
+"Newest/latest note" questions are additionally recognized by a deterministic phrase check
+(`detect_recent_notes_listing`), because the model alone proved unreliable for them: in the
+first eval run on main, gpt-4o-mini answered `NONE` to "Was ist meine neueste Notiz?" although
+the prompt has the English twin as an example. The phrase check decides *whether* it is a
+listing; the model, when it agrees, still contributes the course words.
 """
 
 import logging
@@ -102,6 +108,48 @@ def parse_listing_response(response: str) -> ListingIntent | None:
     return ListingIntent(kind=kind, course=course, timeframe=timeframe)
 
 
+_NOTE_WORD = r"(?:notiz(?:en)?|notes?)"
+_RECENCY_ADJECTIVE = (
+    r"(?:neu(?:e)?ste[nrs]?|letzte[nrs]?|jüngste[nrs]?"
+    r"|zuletzt\s+(?:angelegte|erstellte|geschriebene|hinzugefügte|gespeicherte)[nrs]?"
+    r"|newest|latest|most\s+recent(?:ly\s+(?:created|added|written|saved))?"
+    r"|last|recent(?:ly\s+(?:created|added|written|saved))?)"
+)
+# "meine neueste Notiz", "die letzten 3 Notizen", "my latest two notes", "most recent note":
+# a recency word, then at most two filler words (an article, a number), then the note word.
+_RECENCY_BEFORE_NOTE_RE = re.compile(
+    rf"\b{_RECENCY_ADJECTIVE}\s+(?:\S+\s+){{0,2}}?{_NOTE_WORD}\b", re.IGNORECASE
+)
+# "welche Notiz habe ich zuletzt angelegt?", "which note did I create last?".
+_NOTE_BEFORE_RECENCY_RE = re.compile(
+    rf"\b{_NOTE_WORD}\b[^.?!]{{0,40}}?"
+    r"(?:\bzuletzt\b|\b(?:creat(?:e|ed)|add(?:ed)?|wr(?:ite|ote|itten)|made|make|sav(?:e|ed)"
+    r"|t(?:ake|ook))\s+(?:most\s+)?"
+    r"(?:last|recently)\b)",
+    re.IGNORECASE,
+)
+# "meine letzte Notiz über Eigenwerte", "my last note on Gram-Schmidt": the question is about a
+# topic, so content retrieval (or the model) decides, not the recency phrase check. "zum Kurs X"
+# / "on course X" names a course, not a topic, and stays a listing.
+_TOPIC_AFTER_NOTE_RE = re.compile(
+    rf"\b{_NOTE_WORD}\s+(?:über|ueber|zu|zum|zur|bezüglich|about|on|regarding|concerning)\b"
+    r"(?!\s+(?:(?:the|my|dem|den|meinem|meinen)\s+)?(?:kurs|course|fach|modul|module)\b)",
+    re.IGNORECASE,
+)
+
+
+def detect_recent_notes_listing(query: str) -> ListingIntent | None:
+    """Deterministic check for "newest / latest / most recent note(s)" questions, English and
+    German ("neueste", "neuste", "letzte", "jüngste", "zuletzt angelegte"). Returns a notes
+    listing without a course (newest first is how every notes listing is ordered), or `None`
+    when the phrasing does not clearly ask for recency or narrows the note to a topic."""
+    if _TOPIC_AFTER_NOTE_RE.search(query):
+        return None
+    if _RECENCY_BEFORE_NOTE_RE.search(query) or _NOTE_BEFORE_RECENCY_RE.search(query):
+        return ListingIntent(kind="notes")
+    return None
+
+
 async def classify_listing_intent(
     query: str,
     *,
@@ -113,7 +161,11 @@ async def classify_listing_intent(
 ) -> ListingIntent | None:
     """Classifies `query`; `None` means "answer with normal retrieval". Never raises.
     `temperature=0.0` for the same reason as rag/date_parse.py: a fixed question on a fixed day
-    should always take the same path."""
+    should always take the same path.
+
+    A recency question caught by `detect_recent_notes_listing` is a notes listing whatever the
+    model says; the model's reply is only used for its course words when it agrees on notes."""
+    recent_notes = detect_recent_notes_listing(query)
     prompt = _PROMPT_TEMPLATE.format(today=today.strftime("%Y-%m-%d, %A"), query=query)
     try:
         response = await complete_chat(
@@ -127,5 +179,12 @@ async def classify_listing_intent(
         )
     except Exception:
         logger.exception("Listing-intent classification failed, falling back to retrieval")
-        return None
-    return parse_listing_response(response)
+        return recent_notes
+    intent = parse_listing_response(response)
+    if recent_notes is None:
+        return intent
+    if intent is not None and intent.kind == "notes":
+        return intent
+    if intent is None:
+        logger.info("Listing intent: recency phrase check overrode a NONE classification")
+    return recent_notes
