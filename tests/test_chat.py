@@ -389,3 +389,115 @@ async def test_chat_falls_back_to_no_context_when_retrieval_fails(
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     assert events == [{"delta": "Hello"}, {"sources": []}]
+
+
+async def test_chat_answers_a_notes_by_course_question_from_the_live_listing(
+    client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    """Regression test for the 2026-11-18 owner test: "welche notizen hab ich im kurs cloud
+    computing?" missed the newest note (similarity top-k has no course filter or recency) and
+    appended an unrelated past session as "geplant". The listing path reads the user's notes
+    live, filters by the note's own course id and offers nothing else to the model."""
+    from datetime import datetime
+
+    from studylife_ai import config as config_module
+    from studylife_ai.rag.listing_intent import ListingIntent
+    from studylife_ai.studylife.models import CourseDto, StudyLifeNote
+
+    class FakeSource:
+        closed = False
+
+        async def get_courses(self) -> list[CourseDto]:
+            return [CourseDto(id=1, name="Cloud Computing"), CourseDto(id=2, name="Analysis")]
+
+        async def get_notes(self) -> list[StudyLifeNote]:
+            return [
+                StudyLifeNote(
+                    id=10,
+                    title="Older note",
+                    content="IaaS",
+                    created_at=datetime(2026, 10, 1),
+                    updated_at=datetime(2026, 10, 1),
+                    course_id=1,
+                ),
+                StudyLifeNote(
+                    id=11,
+                    title="Fresh capture",
+                    content="Serverless",
+                    created_at=datetime(2026, 11, 18, 13, 55),
+                    updated_at=datetime(2026, 11, 18, 13, 55),
+                    course_id=1,
+                ),
+            ]
+
+        async def get_sessions_history(self, **_kwargs: object) -> list[object]:
+            raise AssertionError("a notes question must not read sessions")
+
+        async def aclose(self) -> None:
+            FakeSource.closed = True
+
+    async def fake_source(*_args: object) -> FakeSource:
+        return FakeSource()
+
+    async def fake_classify(query: str, **_kwargs: object) -> ListingIntent:
+        assert query == "welche notizen hab ich im kurs cloud computing?"
+        return ListingIntent(kind="notes", course="cloud computing")
+
+    async def past_session_retrieval(*_args: object) -> list[RetrievedChunk]:
+        return [
+            RetrievedChunk(
+                content_type="session",
+                entity_id=99,
+                chunk_index=0,
+                content="Study session: Cloud Computing ...",
+                title="Cloud Computing, 2026-10-22 10:00",
+                course_id=1,
+                session_id=None,
+                score=0.5,
+                session_start="2026-10-22T10:00:00",
+            )
+        ]
+
+    monkeypatch.setattr("studylife_ai.api.chat._studylife_source", fake_source)
+    monkeypatch.setattr("studylife_ai.api.chat._retrieve_context", past_session_retrieval)
+    monkeypatch.setattr("studylife_ai.rag.chat_context.classify_listing_intent", fake_classify)
+    settings = config_module.get_settings()
+    monkeypatch.setattr(
+        "studylife_ai.api.chat.get_settings",
+        lambda: settings.model_copy(
+            update={"date_parse_model": "openai/gpt-4o", "timezone": "Europe/Berlin"}
+        ),
+    )
+    captured_messages: list[dict[str, str]] = []
+
+    async def fake_acompletion(
+        *_args: object, messages: list[dict[str, str]], **_kwargs: object
+    ) -> object:
+        captured_messages.extend(messages)
+        return _make_fake_stream(["Zwei Notizen"])
+
+    monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
+
+    response = await client.post(
+        "/chat",
+        json={
+            "messages": [
+                {"role": "user", "content": "welche notizen hab ich im kurs cloud computing?"}
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    context = captured_messages[0]["content"]
+    assert "[1] Note: Fresh capture (course: Cloud Computing;" in context
+    assert "[2] Note: Older note (course: Cloud Computing;" in context
+    assert "2026-10-22" not in context
+    assert "(Europe/Berlin)" in captured_messages[1]["content"]
+    events = _parse_sse_events(response.text)
+    assert events[-1] == {
+        "sources": [
+            {"content_type": "note", "entity_id": 11, "title": "Fresh capture", "course_id": 1},
+            {"content_type": "note", "entity_id": 10, "title": "Older note", "course_id": 1},
+        ]
+    }
+    assert FakeSource.closed

@@ -40,7 +40,7 @@ _PROMPT_TEMPLATE = (
 )
 
 
-def _relative_day_label(session_start: str | None, *, today: date) -> str | None:
+def relative_day_label(session_start: str | None, *, today: date) -> str | None:
     """Deterministic day-offset label for a session's start date relative to `today` (e.g.
     "[tomorrow]", "[in 2 days]", "[3 days ago]") - computed in plain Python, not left for the
     LLM to derive from raw calendar dates while scanning dozens of similar-looking passages
@@ -67,7 +67,7 @@ def _relative_day_label(session_start: str | None, *, today: date) -> str | None
 
 def _build_prompt(query: str, chunks: list[RetrievedChunk], *, today: date) -> str:
     def _passage(i: int, chunk: RetrievedChunk) -> str:
-        label = _relative_day_label(chunk.session_start, today=today)
+        label = relative_day_label(chunk.session_start, today=today)
         prefix = f"{label} " if label else ""
         return (
             f"[{i}] ({chunk.content_type}) {prefix}{chunk.title}: "
@@ -137,7 +137,7 @@ async def rerank_chunks(
     in the prompt let the reranker compare a passage's own date against the
     real current one (see docs/decisions.md "Retrieval quality"). A `date`,
     not a pre-formatted string, so `_build_prompt()` can also use it for
-    exact per-passage day-offset arithmetic (see `_relative_day_label()`) -
+    exact per-passage day-offset arithmetic (see `relative_day_label()`) -
     not just the "Today's date is ..." sentence.
 
     Pins `temperature=0.0` on the underlying completion (see docs/decisions.md

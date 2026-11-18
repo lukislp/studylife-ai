@@ -9,8 +9,10 @@ from ragas.dataset_schema import EvaluationResult
 from studylife_ai.config import Settings
 from studylife_ai.eval import runner as runner_module
 from studylife_ai.eval.dataset import EvalCase
-from studylife_ai.eval.runner import EvalReport, NoteMatchResult, run_eval
+from studylife_ai.eval.runner import EvalReport, NoteMatchResult, check_answer_terms, run_eval
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
+from studylife_ai.rag.chat_context import ChatContext
+from studylife_ai.rag.prompt import sources_payload
 
 
 def _settings(**overrides: object) -> Settings:
@@ -109,12 +111,13 @@ async def test_generate_answer_retrieves_context_and_joins_streamed_deltas(
 
     monkeypatch.setattr("studylife_ai.llm.client.litellm.acompletion", fake_acompletion)
 
-    answer, chunks = await runner_module._generate_answer(
+    answer, context = await runner_module._generate_answer(
         "Was sind Eigenwerte?", _settings(), Mock(spec=QdrantStore)
     )
 
     assert answer == "Eigenwerte sind..."
-    assert chunks == [chunk]
+    assert context.contexts == ["det(A - λI) = 0"]
+    assert [s.title for s in context.sources] == ["Eigenwerte"]
 
 
 def test_build_judge_raises_when_judge_model_is_not_set() -> None:
@@ -142,11 +145,15 @@ async def test_run_eval_scores_generated_answers_and_reports_note_matches(
     chunk = _chunk(1, "Eigenwerte", "det(A - λI) = 0")
 
     async def fake_generate_answer(
-        question: str, settings: Settings, store: QdrantStore
-    ) -> tuple[str, list[RetrievedChunk]]:
+        question: str, settings: Settings, store: QdrantStore, source: object = None
+    ) -> tuple[str, ChatContext]:
         if question == "Was sind Eigenwerte?":
-            return "Eigenwerte sind...", [chunk]
-        return "Ich habe dazu nichts gefunden.", []
+            return "Eigenwerte sind...", ChatContext(
+                system_message="",
+                sources=sources_payload([chunk]),
+                contexts=[chunk.content],
+            )
+        return "Ich habe dazu nichts gefunden.", ChatContext(system_message="", sources=[])
 
     monkeypatch.setattr(runner_module, "_generate_answer", fake_generate_answer)
 
@@ -183,3 +190,56 @@ async def test_run_eval_scores_generated_answers_and_reports_note_matches(
         NoteMatchResult(case_id="b", expected_titles={"Cloud"}, retrieved_titles=set()),
     ]
     assert report.note_match_rate == 0.5
+
+
+def test_check_answer_terms_is_case_insensitive_both_ways() -> None:
+    case = EvalCase(
+        id="c",
+        question="q",
+        expected_titles=[],
+        category="listing-notes",
+        required_answer_terms=["Gram-Schmidt"],
+        forbidden_answer_terms=["Sitzung", "geplant"],
+    )
+
+    ok = check_answer_terms(case, "Deine neueste Notiz ist GRAM-SCHMIDT Kurzfassung [1].")
+    bad = check_answer_terms(case, "Ausserdem ist eine Lernsitzung geplant.")
+
+    assert ok.passed
+    assert not bad.passed
+    assert bad.missing_terms == {"Gram-Schmidt"}
+    assert bad.forbidden_terms_found == {"Sitzung", "geplant"}
+
+
+async def test_fixture_data_source_serves_the_seeded_corpus_with_the_newest_note() -> None:
+    from studylife_ai.eval.dataset import load_eval_cases
+    from studylife_ai.eval.fixture import (
+        FixtureDataSource,
+        load_fixture_course_goals,
+        load_fixture_courses,
+        load_fixture_notes,
+        load_fixture_sessions,
+    )
+
+    source = FixtureDataSource(
+        notes=load_fixture_notes(),
+        courses=load_fixture_courses(),
+        sessions=load_fixture_sessions(),
+    )
+    notes = await source.get_notes()
+    newest = max(notes, key=lambda n: n.created_at)
+
+    assert newest.title == "Gram-Schmidt Kurzfassung"
+    assert newest.course_id == 6
+
+    # Every expected title of every eval case names something in the fixture corpus - a typo
+    # would make a case fail forever for the wrong reason.
+    sessions = await source.get_sessions_history(days=1825, only_completed=False)
+    known = (
+        {n.title for n in notes}
+        | {c.name for c in await source.get_courses()}
+        | {f"{s.course_name}, {s.start_time:%Y-%m-%d %H:%M}" for s in sessions}
+        | {f"{g.course_name} goal" for g in load_fixture_course_goals()}
+    )
+    for case in load_eval_cases():
+        assert set(case.expected_titles) <= known, case.id

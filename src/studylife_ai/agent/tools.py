@@ -1,18 +1,27 @@
-"""Agent tools: two read tools (execute immediately) and two write tools
+"""Agent tools: four read tools (execute immediately) and two write tools
 (never execute directly - HumanInTheLoopMiddleware pauses before them, see
 `agent/graph.py`). Built as closures over the calling user's own resources
 (`StudyLifeClient`, `QdrantStore`, `user_id`) via a factory, so tools don't
 need their own dependency-injection machinery. `build_tools()` is called
 fresh per `/agent` request, not once at startup (see docs/decisions.md
 "M4.5 Multi-user support" - "Agent graph: rebuilt per request").
+
+list_notes/list_sessions answer enumeration questions from the live API
+(rag/listing.py, the same code /chat uses); search_notes stays the tool for
+content questions (see docs/decisions.md "Structured listings for enumeration
+questions").
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from langchain_core.tools import BaseTool, tool
 
+from studylife_ai.clock import local_now
 from studylife_ai.config import Settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
+from studylife_ai.rag.listing import fetch_listing
+from studylife_ai.rag.listing_intent import ListingIntent, Timeframe
+from studylife_ai.rag.prompt import listing_tool_output
 from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.studylife.client import StudyLifeClient
 from studylife_ai.studylife.models import StudySessionDto
@@ -73,6 +82,53 @@ def build_tools(
         )
         return f"{_NOTE_DATA_WARNING}\n\n{results}"
 
+    async def _listing(intent: ListingIntent) -> str:
+        listing = await fetch_listing(
+            intent,
+            source=studylife,
+            courses=await studylife.get_courses(),
+            now=local_now(settings.timezone),
+            max_items=settings.listing_max_items,
+            session_history_days=settings.studylife_session_history_days,
+        )
+        return f"{_NOTE_DATA_WARNING}\n\n{listing_tool_output(listing)}"
+
+    @tool
+    async def list_notes(course: str | None = None) -> str:
+        """List the user's notes, newest first, optionally only those of one course.
+
+        Use this - not search_notes - for questions that enumerate notes: "which
+        notes do I have in course X", "my newest/latest note", "how many notes".
+        The result is complete and read live, including notes created minutes ago.
+
+        Args:
+            course: The course name as the user wrote it (matched against the
+                real catalog), or omitted for all courses.
+        """
+        return await _listing(ListingIntent(kind="notes", course=course))
+
+    @tool
+    async def list_sessions(
+        course: str | None = None,
+        when: Timeframe = "upcoming",
+        day: date | None = None,
+    ) -> str:
+        """List the user's study sessions (calendar entries) with their real status.
+
+        Use this for "what's planned/on today/this week", "my next sessions in X".
+        Each session's status is computed from the current time - a past session
+        is never planned, even if it was not marked completed.
+
+        Args:
+            course: The course name as the user wrote it, or omitted for all courses.
+            when: upcoming (default: not over yet), today, tomorrow, this_week,
+                next_week, last_week, past, all, or date (then also pass day).
+            day: The calendar day, only for when="date".
+        """
+        return await _listing(
+            ListingIntent(kind="sessions", course=course, timeframe=when, day=day)
+        )
+
     @tool
     async def create_study_session(
         course_id: int,
@@ -127,4 +183,11 @@ def build_tools(
         created = await studylife.create_note(title=title, content=content, course_id=course_id)
         return {"id": created.id, "title": created.title}
 
-    return [list_courses, search_notes, create_study_session, save_note]
+    return [
+        list_courses,
+        list_notes,
+        list_sessions,
+        search_notes,
+        create_study_session,
+        save_note,
+    ]

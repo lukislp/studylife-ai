@@ -43,6 +43,11 @@ dependencies = [
     # (#, **, `, table pipes) doesn't leak into embeddings/RAG answers. Pure Python, no C
     # extensions - fine for a Raspberry Pi/arm64 deployment.
     "mistune>=3.0",
+    # TIMEZONE setting (see docs/decisions.md "Structured listings for enumeration questions"):
+    # zoneinfo needs an IANA database, and the python:3.12-slim image does not guarantee one at
+    # /usr/share/zoneinfo. tzdata is the stdlib's documented fallback - pure data, no code, and
+    # already in uv.lock (via pandas in the dev group), so this only promotes it to runtime.
+    "tzdata>=2024.1",
 ]
 
 [tool.uv]

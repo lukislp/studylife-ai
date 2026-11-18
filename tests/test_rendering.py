@@ -84,12 +84,15 @@ def test_render_course_with_group_and_topics() -> None:
     )
 
 
-def test_render_session_planned_without_topic_or_notes() -> None:
+def test_render_session_not_completed_without_topic_or_notes() -> None:
+    """Never "Planned": the indexed text outlives the session date, and a session from weeks
+    ago labeled "Planned" was presented as "geplant" by the chat (2026-11-18)."""
     text = render_session(_session())
 
     assert text == (
-        "Study session: Lineare Algebra, 2026-08-01 10:00 - 2026-08-01 11:30\nStatus: Planned"
+        "Study session: Lineare Algebra, 2026-08-01 10:00 - 2026-08-01 11:30\nStatus: Not completed"
     )
+    assert "Planned" not in text
 
 
 def test_render_session_completed_with_topic_and_notes() -> None:

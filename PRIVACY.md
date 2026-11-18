@@ -30,8 +30,11 @@ Chat messages themselves are not stored by this service outside agent checkpoint
 
 ## Where your content is sent
 
-To the AI provider the operator chose with `LLM_MODEL`, `EMBEDDING_MODEL`, `RERANK_MODEL` and
-`DATE_PARSE_MODEL` (for example OpenAI, or a model the operator runs themselves). Which provider
+To the AI provider the operator chose with `LLM_MODEL`, `EMBEDDING_MODEL`, `RERANK_MODEL`,
+`DATE_PARSE_MODEL` and, if set, `LISTING_INTENT_MODEL` (for example OpenAI, or a model the
+operator runs themselves). To list your notes or sessions for a chat question, the service reads
+them live from StudyAtrium with your own AI key and sends titles, a short preview, course names
+and dates of the listed items to the chat model; nothing of that is stored. Which provider
 that is, and whether it runs on infrastructure the operator controls, is reported by
 `GET /internal/provider-info` and shown to you in StudyAtrium before you agree. Nothing is sent to
 a model before you have agreed: StudyAtrium refuses AI requests without a consent that covers the

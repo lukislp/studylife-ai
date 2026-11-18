@@ -5,7 +5,7 @@ from pytest import LogCaptureFixture, MonkeyPatch
 
 from studylife_ai.ingestion.qdrant_store import RetrievedChunk
 from studylife_ai.rag import rerank as rerank_module
-from studylife_ai.rag.rerank import _build_prompt, _parse_order, _relative_day_label, rerank_chunks
+from studylife_ai.rag.rerank import _build_prompt, _parse_order, relative_day_label, rerank_chunks
 
 
 def _chunk(
@@ -57,23 +57,23 @@ def test_build_prompt_instructs_exact_offset_not_just_direction_or_proximity() -
     assert "any language" in prompt
 
 
-def test_relative_day_label_covers_today_tomorrow_yesterday_and_wider_offsets() -> None:
+def testrelative_day_label_covers_today_tomorrow_yesterday_and_wider_offsets() -> None:
     today = date(2026, 8, 11)
-    assert _relative_day_label("2026-08-11T16:00:00", today=today) == "[today]"
-    assert _relative_day_label("2026-08-12T16:00:00", today=today) == "[tomorrow]"
-    assert _relative_day_label("2026-08-10T16:00:00", today=today) == "[yesterday]"
-    assert _relative_day_label("2026-08-13T16:00:00", today=today) == "[in 2 days]"
-    assert _relative_day_label("2026-08-09T16:00:00", today=today) == "[2 days ago]"
-    assert _relative_day_label("2026-08-08T16:00:00", today=today) == "[3 days ago]"
+    assert relative_day_label("2026-08-11T16:00:00", today=today) == "[today]"
+    assert relative_day_label("2026-08-12T16:00:00", today=today) == "[tomorrow]"
+    assert relative_day_label("2026-08-10T16:00:00", today=today) == "[yesterday]"
+    assert relative_day_label("2026-08-13T16:00:00", today=today) == "[in 2 days]"
+    assert relative_day_label("2026-08-09T16:00:00", today=today) == "[2 days ago]"
+    assert relative_day_label("2026-08-08T16:00:00", today=today) == "[3 days ago]"
 
 
-def test_relative_day_label_returns_none_for_missing_or_unparseable_dates() -> None:
+def testrelative_day_label_returns_none_for_missing_or_unparseable_dates() -> None:
     today = date(2026, 8, 11)
-    assert _relative_day_label(None, today=today) is None
-    assert _relative_day_label("not-a-date", today=today) is None
+    assert relative_day_label(None, today=today) is None
+    assert relative_day_label("not-a-date", today=today) is None
 
 
-def test_build_prompt_prefixes_session_passages_with_their_relative_day_label() -> None:
+def test_build_prompt_prefixes_session_passages_with_theirrelative_day_label() -> None:
     """The core of the "übermorgen" fix (docs/decisions.md "Structured session dates"): each
     session passage's day offset is precomputed in Python and shown to the model as ground
     truth, instead of leaving date arithmetic entirely to the LLM."""

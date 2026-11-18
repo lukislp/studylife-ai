@@ -80,11 +80,16 @@ def render_course(course: CourseDto) -> str:
 
 
 def render_session(session: StudySessionDto) -> str:
+    """Says "Not completed", never "Planned": this text is indexed once and read for months, while
+    whether a session is still planned depends on the day it is read. The prompt adds a
+    computed past/upcoming label at answer time instead (rag/prompt.py) - an indexed "Planned"
+    on a session from weeks ago is what made the chat call it "geplant" (2026-11-18). The text
+    change also changes fingerprint_session(), so every session is re-indexed once."""
     lines = [
         f"Study session: {session.course_name}, "
         f"{session.start_time.strftime(DATETIME_FORMAT)} - "
         f"{session.end_time.strftime(DATETIME_FORMAT)}",
-        f"Status: {'Completed' if session.is_completed else 'Planned'}",
+        f"Status: {'Completed' if session.is_completed else 'Not completed'}",
     ]
     if session.topic:
         lines.append(f"Topic: {session.topic}")

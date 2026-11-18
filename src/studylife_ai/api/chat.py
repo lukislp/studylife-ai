@@ -1,25 +1,27 @@
-"""Chat endpoint: RAG-augmented, streams an LLM completion back via SSE.
+"""Chat endpoint: context-augmented, streams an LLM completion back via SSE.
 
-Every request is retrieval-augmented (docs/decisions.md "Prompt design"):
-the latest user message is used to fetch relevant note chunks, which are
-injected as a system message ahead of the conversation. Streamed events:
-`{"delta": "..."}` per token (or one `{"error": "..."}` if the LLM call
-fails mid-stream), then always one `{"sources": [...]}` event listing the
-notes that were actually retrieved (deduplicated, independent of whether
-the model cited them or whether streaming succeeded), then `data: [DONE]`.
+Every request is augmented with a context system message built by
+`rag/chat_context.py` from the latest user message: retrieved note chunks for
+content questions (docs/decisions.md "Prompt design"), or a structured listing
+read live from the StudyLife API for enumeration questions ("which notes do I
+have in course X" - docs/decisions.md "Structured listings for enumeration
+questions"). Streamed events: `{"delta": "..."}` per token (or one
+`{"error": "..."}` if the LLM call fails mid-stream), then always one
+`{"sources": [...]}` event listing the entities the context was built from
+(deduplicated, independent of whether the model cited them or whether
+streaming succeeded), then `data: [DONE]`.
 
 Requires the signed proxy token described in `api/identity.py` (see
 docs/decisions.md "M4.5 Multi-user support") - `user_id` scopes retrieval to
-the calling user's own Qdrant partition. Unlike `/agent`, /chat never calls
-StudyLife's own API (pure RAG over already-ingested Qdrant data), so it
-needs no `StudyLifeClient` and no `STUDYLIFE_API_BASE_URL` - identity is
-fully verified locally via the token signature.
+the calling user's own Qdrant partition. Listings and course names are read
+with the user's own registered AiApiKey (the same key and consent gate as
+/agent); without `STUDYLIFE_API_BASE_URL` or a registered key /chat still
+answers, from retrieval alone.
 """
 
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -27,13 +29,16 @@ from fastapi.responses import StreamingResponse
 from studylife_ai.api.consent import require_ai_consent
 from studylife_ai.api.identity import ResolvedIdentity, resolve_identity
 from studylife_ai.api.rate_limit import enforce_rate_limit
+from studylife_ai.clock import local_now
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore, RetrievedChunk
 from studylife_ai.llm.client import stream_chat_completion
-from studylife_ai.rag.date_parse import week_bounds
-from studylife_ai.rag.prompt import build_context_system_message, sources_payload
+from studylife_ai.rag.chat_context import build_chat_context
+from studylife_ai.rag.prompt import current_date_message
 from studylife_ai.rag.retrieval import retrieve_with_rerank
 from studylife_ai.schemas.chat import ChatMessage, ChatRequest
+from studylife_ai.studylife.client import StudyLifeClient
+from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
 
@@ -85,49 +90,72 @@ async def _retrieve_context(
     return await retrieve_with_rerank(query, store=store, settings=settings, user_id=user_id)
 
 
+async def _studylife_source(
+    key_store: RegisteredKeyStore, user_id: str, settings: Settings
+) -> StudyLifeClient | None:
+    """The calling user's own StudyLife API client (their registered AiApiKey, so every read is
+    scoped to their account), or `None` when that isn't possible - /chat then answers from
+    retrieval alone, as it did before structured listings existed."""
+    if not settings.studylife_api_base_url:
+        return None
+    try:
+        api_key = await key_store.get(user_id)
+    except Exception:
+        logger.exception("Registered-key lookup failed for user_id=%s", user_id)
+        return None
+    if api_key is None:
+        return None
+    return StudyLifeClient(
+        base_url=settings.studylife_api_base_url,
+        api_key=api_key,
+        ca_cert_path=settings.studylife_ca_cert_path,
+    )
+
+
 async def _sse_event_stream(
-    request: ChatRequest, store: QdrantStore, user_id: str, model: str
+    request: ChatRequest,
+    store: QdrantStore,
+    key_store: RegisteredKeyStore,
+    user_id: str,
+    model: str,
 ) -> AsyncIterator[str]:
     settings = get_settings()
-
-    try:
-        chunks = await _retrieve_context(
-            _latest_user_message(request.messages), settings, store, user_id
-        )
-    except Exception:
-        logger.exception("Retrieval failed, continuing without note context")
-        chunks = []
-
-    context_message = ChatMessage(role="system", content=build_context_system_message(chunks))
+    query = _latest_user_message(request.messages)
     # Without this, the model has no way to know "today" and answers relative-date questions
     # ("what's on today/this week") against training data instead - same fix, same reasoning,
     # as api/agent.py's identical injection (found live: /chat asserted a specific "today" that
-    # was months off). Local time, not UTC - matches StudyAtrium's own sessions, which store naive
-    # local timestamps (see docs/decisions.md).
-    now = datetime.now()
-    this_week = week_bounds(now.date(), weeks_ago=0)
-    last_week = week_bounds(now.date(), weeks_ago=1)
+    # was months off). Local time in Settings.timezone, not UTC - matches StudyAtrium's own
+    # sessions, which store naive local timestamps (see docs/decisions.md).
+    now = local_now(settings.timezone)
+
+    source = await _studylife_source(key_store, user_id, settings)
+    try:
+        context = await build_chat_context(
+            query,
+            retrieve=lambda: _retrieve_context(query, settings, store, user_id),
+            source=source,
+            settings=settings,
+            now=now,
+            user_id=user_id,
+        )
+    finally:
+        if source is not None:
+            await source.aclose()
+
+    context_message = ChatMessage(role="system", content=context.system_message)
     # States the exact Mon-Sun week boundaries as ground truth, not just "today" - found live
     # (2026-08-12): even with the correct sessions retrieved and listed, the answering model's
     # own framing sentence mislabeled a correctly-resolved "last week" range as "the week before
-    # last week" - the same "don't let the LLM compute date/week arithmetic itself" fix already
-    # applied to retrieval (date_parse.py) and reranking (rerank.py), now applied to how the
-    # answer describes the range too. Reuses date_parse.py's week_bounds() so this can never
-    # disagree with what was actually retrieved for a "last week"/"this week" question.
+    # last week" (see rag/prompt.py's current_date_message()).
     date_message = ChatMessage(
-        role="system",
-        content=(
-            f"The current date and time is {now.strftime('%Y-%m-%d %H:%M, %A')}. "
-            f"This week (Monday-Sunday) is {this_week.start} to {this_week.end}. "
-            f"Last week (Monday-Sunday) is {last_week.start} to {last_week.end}."
-        ),
+        role="system", content=current_date_message(now, timezone=settings.timezone)
     )
     augmented_messages = [context_message, date_message, *request.messages]
-    # Computed once, up front, from the already-retrieved chunks — independent of
+    # Computed once, up front, from the already-built context — independent of
     # whether the LLM call below succeeds, so a client always learns which notes
     # were consulted, and a bug here can never be mislabeled as an LLM failure.
     sources_event = (
-        f"data: {json.dumps({'sources': [s.model_dump() for s in sources_payload(chunks)]})}\n\n"
+        f"data: {json.dumps({'sources': [s.model_dump() for s in context.sources]})}\n\n"
     )
 
     try:
@@ -161,7 +189,8 @@ async def chat(
     # instead.
     model = _resolve_model(request.model, get_settings())
     store: QdrantStore = http_request.app.state.qdrant_store
+    key_store: RegisteredKeyStore = http_request.app.state.registered_key_store
     return StreamingResponse(
-        _sse_event_stream(request, store, identity.user_id, model),
+        _sse_event_stream(request, store, key_store, identity.user_id, model),
         media_type="text/event-stream",
     )

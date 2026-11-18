@@ -85,6 +85,9 @@ jobs:
       # through a custom api_base litellm can't reach in CI.
       LLM_API_BASE: ""
       EMBEDDING_MODEL: openai/text-embedding-3-small
+      # Exercises the structured-listing path the listing-* eval cases test, against the
+      # fixture corpus standing in for the StudyLife API (eval/__main__.py).
+      LISTING_INTENT_MODEL: openai/gpt-4o-mini
       EVAL_JUDGE_MODEL: openai/gpt-4o-mini
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:

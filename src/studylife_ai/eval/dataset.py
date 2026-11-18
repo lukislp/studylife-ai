@@ -17,6 +17,11 @@ class EvalCase(BaseModel):
     question: str
     expected_titles: list[str]
     category: str
+    # Deterministic answer checks (case-insensitive substrings), for failures the RAGAS metrics
+    # don't see: a term the answer must contain (e.g. the newest note's title) or must not
+    # contain (e.g. an unasked session add-on, a past date presented as planned).
+    required_answer_terms: list[str] = []
+    forbidden_answer_terms: list[str] = []
 
 
 def load_eval_cases(path: Path = DEFAULT_DATASET_PATH) -> list[EvalCase]:
