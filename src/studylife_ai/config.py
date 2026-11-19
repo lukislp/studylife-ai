@@ -78,8 +78,10 @@ class Settings(BaseSettings):
     # /agent/confirm, /internal/enrich-capture) this service itself asks StudyAtrium, with the
     # user's registered AiApiKey, whether that user has an AI consent covering the current
     # provider (StudyAtrium answers 403 `ai-consent-required` otherwise) instead of trusting the
-    # caller to have checked. On by default; "false" restores the old trust-the-caller behaviour.
-    # Not enforceable while `studylife_api_base_url` is unset (nothing to ask).
+    # caller to have checked. On by default; "false" restores the old trust-the-caller behaviour
+    # for local development only: with ENVIRONMENT=production, "false" (or an unset
+    # `studylife_api_base_url`, which leaves nothing to ask) makes startup fail (S8, see the
+    # validator below).
     ai_consent_check: bool = True
     # How long a positive consent answer is reused per user, so a chat burst is not one extra
     # StudyAtrium round-trip per request. A withdrawal takes effect after at most this long.
@@ -304,19 +306,16 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # Audit O6-ai (2026-08-26, see docs/decisions.md): GET /metrics (main.py, via
-    # prometheus-fastapi-instrumentator) is unauthenticated, and its labels include per-user_id
-    # LLM cost/token/latency data (llm/metrics.py) - anyone who can reach the port can read
-    # every user's spend. Optional static bearer: unset (the default) is a genuine no-op, the
+    # prometheus-fastapi-instrumentator) is unauthenticated by default. Since GDPR audit S8 its
+    # LLM cost/token/latency metrics are aggregate only (no user_id label, llm/metrics.py), but
+    # it still exposes operational data, so a token is recommended. Optional static bearer:
+    # unset (the default) is a genuine no-op, the
     # endpoint stays exactly as unauthenticated as it is today, since the operator's Prometheus
     # may not be reconfigured yet. When set, GET /metrics requires an `Authorization: Bearer
     # <token>` header matching this value (constant-time compare, same convention as
     # studylife_internal_api_secret) or responds 401 - the operator must then add
     # `authorization: {credentials: <token>}` to Prometheus's own scrape config for the
-    # "studylife-ai" job (see README.md "Observability"). Chosen over dropping the user_id
-    # label: per-user cost attribution is the whole point of that label (see llm/metrics.py) and
-    # cardinality is already bounded (a handful of real users, not a public multi-tenant
-    # service) - gating the endpoint closes the actual leak (unauthenticated network access)
-    # without losing that data.
+    # "studylife-ai" job (see README.md "Observability").
     metrics_token: str | None = None
 
     # Audit O6-ai (2026-08-26, see docs/decisions.md): /internal/* (api/internal.py) shares the
@@ -352,6 +351,23 @@ class Settings(BaseSettings):
     def _tls_files_set_together(self) -> "Settings":
         if bool(self.tls_cert_file) != bool(self.tls_key_file):
             raise ValueError("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+        return self
+
+    @model_validator(mode="after")
+    def _production_enforces_consent_check(self) -> "Settings":
+        """Fail closed (GDPR audit S8): in production the service refuses to start when the
+        consent check cannot run, instead of serving chat/agent/indexing without it. Outside
+        production `AI_CONSENT_CHECK=false` or a missing `STUDYLIFE_API_BASE_URL` stay available
+        for local development and tests."""
+        if self.environment != "production":
+            return self
+        if not self.studylife_api_base_url:
+            raise ValueError(
+                "STUDYLIFE_API_BASE_URL must be set when ENVIRONMENT=production: "
+                "the AI consent check needs StudyAtrium."
+            )
+        if not self.ai_consent_check:
+            raise ValueError("AI_CONSENT_CHECK=false is not allowed when ENVIRONMENT=production")
         return self
 
     @property

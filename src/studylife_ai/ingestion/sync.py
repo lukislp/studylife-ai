@@ -33,6 +33,12 @@ from studylife_ai.ingestion.rendering import (
 )
 from studylife_ai.llm.embeddings import embed_texts
 from studylife_ai.studylife.client import StudyLifeClient
+from studylife_ai.studylife.consent import (
+    ConsentRequired,
+    ConsentUnverifiable,
+    ensure_ai_consent,
+    is_consent_required,
+)
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
@@ -45,27 +51,12 @@ logger = logging.getLogger(__name__)
 # side without purging a still-valid registration over a blip.
 ZOMBIE_401_THRESHOLD = 20
 
-# StudyAtrium answers requests made with a user's AI key with 403 and this problem `type` while
-# that user has no consent covering the current AI provider (StudyAtrium's AiConsentService - the
-# migration case, a withdrawn consent, or a provider change). It is a pause, not a failure: the
-# user's indexed data stays, the registration stays, and the next tick after they answer just
-# works. See docs/decisions.md "Provider description endpoint".
-CONSENT_REQUIRED_PROBLEM = "ai-consent-required"
+# Missing consent (see studylife/consent.py) is a pause, not a failure: the user's indexed data
+# stays, the registration stays, and the next tick after they answer just works.
 
 # Users whose last sync was paused for consent - only to log the pause once instead of every
 # tick (ingestion_sync_interval_seconds, default 60s), and the resumption once.
 _paused_for_consent: set[str] = set()
-
-
-def is_consent_required(exc: httpx.HTTPStatusError) -> bool:
-    """True when `exc` is StudyAtrium's 403 `ai-consent-required` problem."""
-    if exc.response.status_code != 403:
-        return False
-    try:
-        body = exc.response.json()
-    except ValueError:
-        return False
-    return isinstance(body, dict) and body.get("type") == CONSENT_REQUIRED_PROBLEM
 
 
 def note_consent_pause(user_id: str) -> None:
@@ -207,9 +198,20 @@ async def sync_content_type[T](
 
 
 async def sync_user(
-    *, user_id: str, ai_api_key: str, settings: Settings, store: QdrantStore
+    *,
+    user_id: str,
+    ai_api_key: str,
+    settings: Settings,
+    store: QdrantStore,
+    key_store: RegisteredKeyStore,
 ) -> None:
     """Sync one user's notes/courses/sessions/course goals into their own Qdrant partition.
+
+    Indexing sends the user's content to the embedding model, so it checks the AI consent
+    itself first (GDPR audit S8) instead of relying on StudyAtrium's 403 for the later reads:
+    raises `ConsentRequired` (no consent) or `ConsentUnverifiable` (cannot be established)
+    before anything is fetched, embedded or stored. `key_store` is where the consent probe
+    reads the user's registered key from.
 
     Public (not `_`-prefixed): called both by `sync_all()` below (looping over every
     registered user) and directly by `api/internal.py`'s registration handler (a single user,
@@ -218,6 +220,8 @@ async def sync_user(
     since `api/internal.py`'s caller reuses the app-lifetime `app.state.qdrant_store` instead of
     opening a new connection per registration.
     """
+    await ensure_ai_consent(user_id, settings=settings, key_store=key_store)
+
     known = await store.get_known_fingerprints(user_id=user_id)
 
     async with StudyLifeClient(
@@ -397,8 +401,30 @@ async def sync_all(
                 continue
             try:
                 await sync_user(
-                    user_id=user_id, ai_api_key=ai_api_key, settings=settings, store=store
+                    user_id=user_id,
+                    ai_api_key=ai_api_key,
+                    settings=settings,
+                    store=store,
+                    key_store=registered_keys,
                 )
+            except ConsentRequired:
+                note_consent_pause(user_id)
+            except ConsentUnverifiable as exc:
+                cause = exc.__cause__
+                if isinstance(cause, httpx.HTTPStatusError) and cause.response.status_code == 401:
+                    # The consent probe is the first call made with the key: a dead key shows
+                    # up here now and still counts towards the zombie purge.
+                    await _handle_sync_401(
+                        user_id=user_id,
+                        settings=settings,
+                        store=store,
+                        registered_keys=registered_keys,
+                    )
+                else:
+                    # Fail closed: nothing indexed this tick; ensure_ai_consent already logged why.
+                    logger.info(
+                        "Sync: user_id=%s skipped - AI consent could not be verified", user_id
+                    )
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 401:
                     await _handle_sync_401(

@@ -9,8 +9,10 @@ from pytest import LogCaptureFixture, MonkeyPatch
 from studylife_ai.api import internal as internal_module
 from studylife_ai.api.internal import SHARED_SECRET_HEADER, _sync_new_registration
 from studylife_ai.config import Settings
+from studylife_ai.ingestion import sync as sync_module
 from studylife_ai.main import app
 from studylife_ai.rag.enrichment import CaptureEnrichment
+from studylife_ai.studylife.consent import ConsentRequired, ConsentUnverifiable
 from tests.conftest import TEST_SHARED_SECRET
 
 
@@ -201,6 +203,7 @@ async def test_register_key_schedules_auto_ingestion_for_the_new_user(
     assert len(calls) == 1
     assert calls[0]["user_id"] == "alice"
     assert calls[0]["ai_api_key"] == "key-a"
+    assert calls[0]["key_store"] is app.state.registered_key_store
 
 
 async def test_register_key_skips_auto_ingestion_when_studylife_not_configured(
@@ -238,10 +241,59 @@ async def test_sync_new_registration_logs_and_swallows_a_sync_failure(
     monkeypatch.setattr("studylife_ai.api.internal.sync_user", failing_sync_user)
 
     with caplog.at_level(logging.ERROR):
-        await _sync_new_registration("alice", "key-a", store=object())  # type: ignore[arg-type]
+        await _sync_new_registration(
+            "alice",
+            "key-a",
+            store=object(),  # type: ignore[arg-type]
+            key_store=object(),  # type: ignore[arg-type]
+        )
 
     assert "failed" in caplog.text.lower()
     assert "alice" in caplog.text
+
+
+async def test_sync_new_registration_without_consent_pauses_quietly(
+    caplog: LogCaptureFixture, monkeypatch: MonkeyPatch
+) -> None:
+    """GDPR audit S8: the first sync after registration needs the consent too; without it
+    nothing is indexed and nothing is logged as a failure."""
+
+    async def no_consent(**_kwargs: object) -> None:
+        raise ConsentRequired
+
+    monkeypatch.setattr("studylife_ai.api.internal.sync_user", no_consent)
+    sync_module._paused_for_consent.discard("alice")
+
+    with caplog.at_level(logging.INFO):
+        await _sync_new_registration(
+            "alice",
+            "key-a",
+            store=object(),  # type: ignore[arg-type]
+            key_store=object(),  # type: ignore[arg-type]
+        )
+
+    assert "paused" in caplog.text
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+async def test_sync_new_registration_with_unverifiable_consent_skips_quietly(
+    caplog: LogCaptureFixture, monkeypatch: MonkeyPatch
+) -> None:
+    async def unverifiable(**_kwargs: object) -> None:
+        raise ConsentUnverifiable("down")
+
+    monkeypatch.setattr("studylife_ai.api.internal.sync_user", unverifiable)
+
+    with caplog.at_level(logging.INFO):
+        await _sync_new_registration(
+            "alice",
+            "key-a",
+            store=object(),  # type: ignore[arg-type]
+            key_store=object(),  # type: ignore[arg-type]
+        )
+
+    assert "not verifiable" in caplog.text
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
 async def test_revoke_key_removes_the_key(internal_client: AsyncClient) -> None:

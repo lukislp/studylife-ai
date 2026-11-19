@@ -26,12 +26,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from studylife_ai.api.consent import enforce_ai_consent
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
-from studylife_ai.ingestion.sync import (
-    is_consent_required,
-    note_consent_pause,
-    purge_user,
-    sync_user,
-)
+from studylife_ai.ingestion.sync import note_consent_pause, purge_user, sync_user
 from studylife_ai.llm.provider_info import describe_providers
 from studylife_ai.rag.enrichment import enrich_capture
 from studylife_ai.schemas.internal import (
@@ -41,7 +36,13 @@ from studylife_ai.schemas.internal import (
     RegisterKeyRequest,
     RevokeKeyRequest,
 )
-from studylife_ai.studylife.consent import forget_consent
+from studylife_ai.studylife.consent import (
+    ConsentRequired,
+    ConsentUnverifiable,
+    forget_consent,
+    is_consent_required,
+)
+from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,9 @@ def _require_valid_secret(http_request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing shared secret.")
 
 
-async def _sync_new_registration(user_id: str, ai_api_key: str, store: QdrantStore) -> None:
+async def _sync_new_registration(
+    user_id: str, ai_api_key: str, store: QdrantStore, key_store: RegisteredKeyStore
+) -> None:
     """Runs after the HTTP response for /internal/register-key has already gone out (see
     BackgroundTasks below) - a slow/failed first sync must never make StudyLife's own
     "generate my AiApiKey" button hang or error. Failures are logged, not raised: there is
@@ -92,13 +95,24 @@ async def _sync_new_registration(user_id: str, ai_api_key: str, store: QdrantSto
     run (or another registration) will retry the same diff-against-Qdrant logic regardless."""
     try:
         await sync_user(
-            user_id=user_id, ai_api_key=ai_api_key, settings=get_settings(), store=store
+            user_id=user_id,
+            ai_api_key=ai_api_key,
+            settings=get_settings(),
+            store=store,
+            key_store=key_store,
         )
         logger.info("Auto-ingestion after registration succeeded for user_id=%s", user_id)
+    except ConsentRequired:
+        # StudyAtrium has no consent covering the current provider yet; the periodic sync
+        # picks this user up once they agree.
+        note_consent_pause(user_id)
+    except ConsentUnverifiable:
+        logger.info(
+            "Auto-ingestion after registration skipped for user_id=%s: AI consent not verifiable",
+            user_id,
+        )
     except httpx.HTTPStatusError as exc:
         if is_consent_required(exc):
-            # StudyAtrium has no consent covering the current provider yet; the periodic sync
-            # picks this user up once they agree.
             note_consent_pause(user_id)
         else:
             logger.exception("Auto-ingestion after registration failed for user_id=%s", user_id)
@@ -122,6 +136,7 @@ async def register_key(
             request.user_id,
             request.ai_api_key,
             http_request.app.state.qdrant_store,
+            http_request.app.state.registered_key_store,
         )
     return {"ok": True}
 

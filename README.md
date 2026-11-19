@@ -116,7 +116,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | Variable                       | Default                   | Description                                                                 |
 | ------------------------------- | -------------------------- | ----------------------------------------------------------------------------- |
 | `APP_NAME`                     | `StudyAtrium AI`            | Display name used in the FastAPI app metadata.                              |
-| `ENVIRONMENT`                  | `local`                   | One of `local`, `staging`, `production`.                                    |
+| `ENVIRONMENT`                  | `local`                   | One of `local`, `staging`, `production`. `production` requires `STUDYLIFE_API_BASE_URL` and the consent check (see `AI_CONSENT_CHECK`), otherwise startup fails. |
 | `LOG_LEVEL`                    | `INFO`                    | Python logging level.                                                       |
 | `LLM_MODEL`                    | `ollama/llama3.2`         | LiteLLM model identifier; selects provider and model, e.g. `openai/gpt-4o-mini`. |
 | `LLM_API_BASE`                 | `http://localhost:11434`  | Base URL for self-hosted model backends (e.g. Ollama). Unused for most API providers. |
@@ -125,7 +125,7 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `LLM_REQUEST_TIMEOUT_SECONDS`  | `60`                      | Timeout for LLM requests.                                                   |
 | `ALLOWED_CHAT_MODELS`          | _(unset)_                 | Audit F15: comma-separated LiteLLM model strings `POST /chat`'s optional `model` override may name, in addition to `LLM_MODEL` itself (always implicitly allowed). Unset = only `LLM_MODEL` — a request naming anything else gets `400`. See [API](#api). |
 | `OPENAI_API_KEY` / provider keys | _(unset)_                | Read directly by LiteLLM based on the `LLM_MODEL` provider prefix — not modeled by this app. |
-| `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyAtrium instance, e.g. `http://localhost:8080`. One shared instance for all users. Required for ingestion and `/agent` (not `/chat`, which never calls StudyAtrium's API). |
+| `STUDYLIFE_API_BASE_URL`       | _(unset)_                 | Base URL of your StudyAtrium instance, e.g. `http://localhost:8080`. One shared instance for all users. Required for ingestion and `/agent`, and for the AI consent check on `/chat` too: it is mandatory with `ENVIRONMENT=production` (startup fails without it). |
 | `STUDYLIFE_SHARED_SECRET`      | _(unset)_                 | **Legacy** (audit A5, 2026-08-26): the original single shared secret. Kept only as a fallback while `STUDYLIFE_TOKEN_SIGNING_SECRET`/`STUDYLIFE_INTERNAL_API_SECRET` below are unset (logs a one-time deprecation warning), and as a still-accepted legacy 3-part proxy-token format while configured — lets StudyLife's backend and studylife-ai deploy the split independently, in either order. See [docs/decisions.md](docs/decisions.md) "Split the shared secret (audit A5)". |
 | `STUDYLIFE_TOKEN_SIGNING_SECRET` | _(unset, falls back to `STUDYLIFE_SHARED_SECRET`)_ | Verifies StudyLife-signed proxy tokens — one or more comma-separated `kid:secret` entries (e.g. `v1:abc...,v2:def...`); every entry verifies, StudyAtrium's own config always signs with the *first* entry on its side. Rotate by adding a new entry on both sides, waiting out the 5-minute token lifetime, then dropping the old one — no coordinated-redeploy 401 window. See [API](#api) and [docs/decisions.md](docs/decisions.md) "Split the shared secret (audit A5)". |
 | `STUDYLIFE_INTERNAL_API_SECRET` | _(unset, falls back to `STUDYLIFE_SHARED_SECRET`)_ | Authenticates `POST /internal/register-key`/`revoke-key`/`enrich-capture` — a plain constant-time bearer check, not the signed-token scheme above. May be a comma-separated list of *accepted* values (StudyAtrium's backend always sends only the first value from its own config) for rotation without downtime. See [docs/decisions.md](docs/decisions.md) "Split the shared secret (audit A5)". |
@@ -158,8 +158,8 @@ All variables are read from the environment / `.env` (see [`.env.example`](.env.
 | `RATE_LIMIT_REQUESTS`          | `20`                      | Max requests per `RATE_LIMIT_WINDOW_SECONDS`, per resolved user, on `/chat`/`/agent`/`/agent/confirm` — see [docs/decisions.md](docs/decisions.md) "Rate limiting". |
 | `RATE_LIMIT_WINDOW_SECONDS`    | `60`                      | Window size for the rate limit above. |
 | `CAPTURE_COURSE_MATCH_THRESHOLD` | `0.75`                  | Minimum embedding-similarity score (Qdrant COSINE distance) for `/internal/enrich-capture` to auto-assign a course to a captured note — below this, the capture is left unassigned rather than risk a wrong guess. See [Capture enrichment](#capture-enrichment). |
-| `METRICS_TOKEN`                | _(unset)_                 | Audit O6-ai: optional static bearer (recommended in any deployment where `/metrics` is reachable beyond the monitoring system: its labels carry per-user cost data) for `GET /metrics`. Unset = unauthenticated, unchanged from before. Set = every scrape needs a matching `Authorization: Bearer <token>` header, or gets `401`. See [Observability](#observability). |
-| `AI_CONSENT_CHECK`             | `true`                    | GDPR audit F-20: before `/chat`, `/agent`, `/agent/confirm` and `/internal/enrich-capture` send user content to a model, this service asks StudyAtrium itself (one `GET /api/courses` with the user's registered `AiApiKey`) whether that user has an AI consent covering the current provider. `403` `ai-consent-required` if not, `503` if it cannot be established (no registered key, StudyAtrium unreachable): nothing is sent to a model. Skipped while `STUDYLIFE_API_BASE_URL` is unset. `false` restores the previous trust-the-caller behaviour. |
+| `METRICS_TOKEN`                | _(unset)_                 | Audit O6-ai: optional static bearer (recommended in any deployment where `/metrics` is reachable beyond the monitoring system; the metrics are aggregate, with no user labels) for `GET /metrics`. Unset = unauthenticated, unchanged from before. Set = every scrape needs a matching `Authorization: Bearer <token>` header, or gets `401`. See [Observability](#observability). |
+| `AI_CONSENT_CHECK`             | `true`                    | GDPR audit F-20: before `/chat`, `/agent`, `/agent/confirm` and `/internal/enrich-capture` send user content to a model, this service asks StudyAtrium itself (one `GET /api/courses` with the user's registered `AiApiKey`) whether that user has an AI consent covering the current provider. `403` `ai-consent-required` if not, `503` if it cannot be established (no registered key, StudyAtrium unreachable): nothing is sent to a model. The background indexing (periodic sync and the sync after key registration) runs the same check per user before it fetches or embeds anything; without consent the user is skipped and picked up again once they agree. **Fails closed in production:** with `ENVIRONMENT=production` the service refuses to start if `STUDYLIFE_API_BASE_URL` is unset or `AI_CONSENT_CHECK=false`. Outside production (`local`, `staging`) `false` / an unset base URL remain as an explicit local-development escape that skips the check. |
 | `AI_CONSENT_CACHE_SECONDS`     | `30`                      | How long a positive consent answer is reused per user. A withdrawal takes effect after at most this long. |
 | `INTERNAL_API_PORT`            | `8001`                    | Audit O6-ai: dedicated port `/internal/*` is served on exclusively (not the main port at all) — a second `uvicorn.Server` in the same process. Only meaningful for the k3s deployment's `NetworkPolicy`; harmless to leave at the default everywhere else. See [Deployment](#deployment). |
 
@@ -257,18 +257,18 @@ llm_call call_site=chat model=gpt-4o-mini latency_ms=1281 prompt_tokens=153 comp
 
 `call_site` (`chat`, `agent`, `rerank`, `retrieval`, `ingestion`, `eval`, `eval-fixture`, `eval-judge`) is pure logging metadata passed to LiteLLM per call - it never reaches the model. `cost_usd` comes straight from LiteLLM's own price-map lookup (`0.0` for local Ollama models, since there's nothing to price). A failed call logs `llm_call_failed` at `WARNING` with the same fields plus the exception, instead of silently disappearing.
 
-The same callback also records the identical data as Prometheus metrics (`llm/metrics.py`), plus a `user_id` label (StudyAtrium's own numeric auth user id) not present in the log line - see [docs/decisions.md](docs/decisions.md) "Metrics dashboard". Exposed at `GET /metrics` (via `prometheus-fastapi-instrumentator`, which also auto-instruments plain HTTP request rate/latency/status per endpoint):
+The same callback also records the identical data as Prometheus metrics (`llm/metrics.py`), aggregated by call site and model only (no user label) - see [docs/decisions.md](docs/decisions.md) "Metrics dashboard". Exposed at `GET /metrics` (via `prometheus-fastapi-instrumentator`, which also auto-instruments plain HTTP request rate/latency/status per endpoint):
 
 | Metric | Type | Labels | Shows |
 |---|---|---|---|
-| `studylife_ai_llm_calls_total` | Counter | `call_site`, `model`, `user_id`, `status` | Call volume, success vs. failure |
-| `studylife_ai_llm_cost_usd_total` | Counter | `call_site`, `model`, `user_id` | Cumulative cost - `sum by (user_id) (...)` answers "who spent what" |
-| `studylife_ai_llm_latency_seconds` | Histogram | `call_site`, `model`, `user_id` | p50/p95/p99 latency |
-| `studylife_ai_llm_prompt_tokens_total` / `..._completion_tokens_total` | Counter | `call_site`, `model`, `user_id` | Token usage |
+| `studylife_ai_llm_calls_total` | Counter | `call_site`, `model`, `status` | Call volume, success vs. failure |
+| `studylife_ai_llm_cost_usd_total` | Counter | `call_site`, `model` | Cumulative cost per call site and model |
+| `studylife_ai_llm_latency_seconds` | Histogram | `call_site`, `model` | p50/p95/p99 latency |
+| `studylife_ai_llm_prompt_tokens_total` / `..._completion_tokens_total` | Counter | `call_site`, `model` | Token usage |
 
 Scraped by the existing self-hosted Prometheus in the homelab-infra repo (`monitoring/01-prometheus.yaml`, `job_name: studylife-ai`) and visualized in its own Grafana folder ("StudyAtrium AI", `monitoring/05-grafana-dashboards.yaml`) - deliberately separate from the main "StudyAtrium" dashboard folder, since this is a different service with its own repo/release cycle.
 
-`GET /metrics` is unauthenticated by default, same as before this was audited (audit O6-ai, 2026-08-26) - anyone who can reach the port can read every user's cost/token/latency data via the `user_id` label above. Setting `METRICS_TOKEN` requires a matching `Authorization: Bearer <token>` header on every request or `401`s - update Prometheus's own scrape config for the `studylife-ai` job accordingly, e.g.:
+`GET /metrics` is unauthenticated by default, same as before this was audited (audit O6-ai, 2026-08-26) - anyone who can reach the port can read the aggregate request, cost, token and latency numbers. Setting `METRICS_TOKEN` requires a matching `Authorization: Bearer <token>` header on every request or `401`s - update Prometheus's own scrape config for the `studylife-ai` job accordingly, e.g.:
 
 ```yaml
 scrape_configs:
@@ -277,7 +277,7 @@ scrape_configs:
       credentials: <the same value as METRICS_TOKEN>
 ```
 
-The `user_id` label itself is kept (not dropped) even once `METRICS_TOKEN` is set - per-user cost attribution is the actual point of that label, and cardinality is already bounded (see `llm/metrics.py`); gating network access closes the real leak without losing the data.
+The LLM metrics are aggregate only: there is no `user_id` (or any other personal) label, so `/metrics` never reveals who used the assistant (GDPR audit S8; earlier versions had one, so existing Grafana queries with `sum by (user_id)` must be changed). Per-user attribution is not offered.
 
 ## Deployment
 
@@ -307,7 +307,7 @@ Not every file is Flux-managed: [`k8s/flux-deploy/kustomization.yaml`](k8s/flux-
 - [x] **Rate limiting** — the piece deferred out of M5. Fixed-window, per-user, in-memory (single-replica deployment, so no shared state needed) — see [docs/decisions.md](docs/decisions.md) "Rate limiting".
 - [x] **M6** — Documentation polish, architecture diagram ([Architecture](#architecture)), demo material ([docs/demo.md](docs/demo.md)).
 - [x] **Backlog** — ingest courses and calendar/session data too. Done: courses, study sessions, and course goals are now ingested alongside notes (see [Ingestion](#ingestion) and [docs/decisions.md](docs/decisions.md) "Ingestion scope expansion").
-- [x] **Metrics dashboard** — LLM cost/latency/token Prometheus metrics, per-user cost attribution, scraped by the existing self-hosted Prometheus and visualized in its own Grafana folder (see [Observability](#observability) and [docs/decisions.md](docs/decisions.md) "Metrics dashboard").
+- [x] **Metrics dashboard** — LLM cost/latency/token Prometheus metrics (aggregate, no per-user labels), scraped by the existing self-hosted Prometheus and visualized in its own Grafana folder (see [Observability](#observability) and [docs/decisions.md](docs/decisions.md) "Metrics dashboard").
 - [x] **Note Markdown rendering** — StudyAtrium's `NoteDto` gained `isMarkdown`; notes written in Markdown mode are now rendered to plain text before chunking/embedding, so raw syntax doesn't leak into RAG answers (see [docs/decisions.md](docs/decisions.md) "Note Markdown rendering").
 - [x] **Capture enrichment** — `POST /internal/enrich-capture` for the [studylife-capture](https://github.com/lukislp/studylife-capture) browser extension: course matching scoped to active courses with a note/session fallback, tags, summary, related notes, immediate indexing. Production-verified, including a live `NetworkPolicy` fix. See [Capture enrichment](#capture-enrichment).
 - [ ] **Capture enrichment accuracy measurement** — course-match/tag/summary quality across a larger set of real [studylife-capture](https://github.com/lukislp/studylife-capture) captures, beyond the single production case verified so far.
