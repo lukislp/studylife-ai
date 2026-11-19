@@ -10,6 +10,7 @@ from pytest import MonkeyPatch
 
 from studylife_ai.config import Settings
 from studylife_ai.ingestion import sync as sync_module
+from studylife_ai.studylife.consent import ConsentRequired, ConsentUnverifiable
 from studylife_ai.studylife.models import CourseDto, CourseGoalDto, StudyLifeNote, StudySessionDto
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 from tests.conftest import TEST_AI_KEY_ENCRYPTION_KEY
@@ -28,6 +29,17 @@ async def _seed_registered_users_on_disk(db_path: str, users: dict[str, str]) ->
     for user_id, ai_api_key in users.items():
         await store.set(user_id, ai_api_key)
     await store.close()
+
+
+@pytest.fixture(autouse=True)
+def _consent_granted(monkeypatch: MonkeyPatch) -> None:
+    """sync_user() checks the AI consent itself (GDPR audit S8); most tests here are about the
+    diff/embed mechanics, so by default consent is in place. The consent tests below replace it."""
+
+    async def _granted(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(sync_module, "ensure_ai_consent", _granted)
 
 
 def _http_401_error() -> httpx.HTTPStatusError:
@@ -752,3 +764,139 @@ async def test_sync_all_with_a_shared_store_neither_reopens_nor_closes_it(
     assert [r for r in caplog.records if "migration" in r.message] == []
     assert await store.get("alice") == "key-a"  # still open
     await store.close()
+
+
+# --- Background indexing checks the AI consent itself (GDPR audit S8) ---
+
+
+def _refusing_consent(error: Exception) -> object:
+    async def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise error
+
+    return _refuse
+
+
+def _must_not_be_called(name: str) -> object:
+    def _fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(f"{name} must not be reached without consent")
+
+    return _fail
+
+
+async def test_sync_user_asks_for_consent_with_the_users_key_store(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    async def _recording(user_id: str, *, settings: Settings, key_store: object) -> None:
+        calls.append((user_id, key_store))
+
+    monkeypatch.setattr(sync_module, "ensure_ai_consent", _recording)
+    monkeypatch.setattr(sync_module, "StudyLifeClient", lambda **kwargs: FakeStudyLifeClient())
+    key_store = object()
+
+    await sync_module.sync_user(
+        user_id="alice",
+        ai_api_key="key-a",
+        settings=_settings(),
+        store=FakeQdrantStore(known={}),  # type: ignore[arg-type]
+        key_store=key_store,  # type: ignore[arg-type]
+    )
+
+    assert calls == [("alice", key_store)]
+
+
+@pytest.mark.parametrize("error", [ConsentRequired(), ConsentUnverifiable("x")])
+async def test_sync_user_without_consent_touches_nothing(
+    monkeypatch: MonkeyPatch, error: Exception
+) -> None:
+    fake_store = FakeQdrantStore(known={})
+    monkeypatch.setattr(sync_module, "ensure_ai_consent", _refusing_consent(error))
+    monkeypatch.setattr(sync_module, "StudyLifeClient", _must_not_be_called("StudyLifeClient"))
+    monkeypatch.setattr(sync_module, "embed_texts", _must_not_be_called("embed_texts"))
+
+    with pytest.raises(type(error)):
+        await sync_module.sync_user(
+            user_id="alice",
+            ai_api_key="key-a",
+            settings=_settings(),
+            store=fake_store,  # type: ignore[arg-type]
+            key_store=object(),  # type: ignore[arg-type]
+        )
+
+    fake_store.replace_entity.assert_not_awaited()
+    fake_store.delete_entity.assert_not_awaited()
+
+
+async def test_sync_all_skips_a_user_without_consent_and_still_syncs_the_others(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    embedded: list[str] = []
+
+    async def fake_embed_texts(
+        texts: list[str], *, model: str, user_id: str, **_kwargs: object
+    ) -> list[list[float]]:
+        embedded.append(user_id)
+        return [[0.1, 0.2] for _ in texts]
+
+    async def consent(user_id: str, **_kwargs: object) -> None:
+        if user_id == "alice":
+            raise ConsentRequired()
+
+    fake_store = FakeQdrantStore(known={})
+    monkeypatch.setattr(sync_module, "ensure_ai_consent", consent)
+    monkeypatch.setattr(
+        sync_module,
+        "StudyLifeClient",
+        lambda **kwargs: FakeStudyLifeClient(notes=[_note(1, "T", "content")]),
+    )
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    monkeypatch.setattr(sync_module, "embed_texts", fake_embed_texts)
+    await _install_registered_users(monkeypatch, {"alice": "key-a", "bob": "key-b"})
+
+    with caplog.at_level("INFO", logger="studylife_ai.ingestion.sync"):
+        await sync_module.sync_all(_settings())
+
+    assert embedded == ["bob"]
+    assert "alice" in sync_module._paused_for_consent
+    assert not any(r.levelname in ("ERROR", "WARNING") for r in caplog.records)
+
+
+async def test_sync_all_skips_a_user_whose_consent_cannot_be_verified(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sync_module, "ensure_ai_consent", _refusing_consent(ConsentUnverifiable("down"))
+    )
+    monkeypatch.setattr(sync_module, "StudyLifeClient", _must_not_be_called("StudyLifeClient"))
+    monkeypatch.setattr(sync_module, "embed_texts", _must_not_be_called("embed_texts"))
+    fake_store = FakeQdrantStore(known={})
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: fake_store)
+    await _install_registered_users(monkeypatch, {"alice": "key-a"})
+
+    await sync_module.sync_all(_settings())
+
+    fake_store.replace_entity.assert_not_awaited()
+    fake_store.delete_entity.assert_not_awaited()
+    assert "alice" not in sync_module._paused_for_consent
+
+
+async def test_sync_all_counts_a_rejected_key_in_the_consent_probe_towards_the_zombie_purge(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def consent(*_args: object, **_kwargs: object) -> None:
+        raise ConsentUnverifiable("rejected") from _http_401_error()
+
+    handled: list[str] = []
+
+    async def fake_handle_401(*, user_id: str, **_kwargs: object) -> None:
+        handled.append(user_id)
+
+    monkeypatch.setattr(sync_module, "ensure_ai_consent", consent)
+    monkeypatch.setattr(sync_module, "_handle_sync_401", fake_handle_401)
+    monkeypatch.setattr(sync_module, "QdrantStore", lambda **kwargs: FakeQdrantStore(known={}))
+    await _install_registered_users(monkeypatch, {"alice": "key-a"})
+
+    await sync_module.sync_all(_settings())
+
+    assert handled == ["alice"]

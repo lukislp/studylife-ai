@@ -13,7 +13,11 @@ Outcomes:
 - cannot be established (no registered key, key rejected, StudyLife unreachable or erroring):
   raises `ConsentUnverifiable` - fail closed, nothing is sent to a model
 - check disabled (`AI_CONSENT_CHECK=false`) or no `STUDYLIFE_API_BASE_URL`: returns without
-  asking (nothing to ask / operator opted out)
+  asking. Only possible outside production: `Settings` refuses to load with
+  `ENVIRONMENT=production` and either of those, so production always fails closed (GDPR audit S8).
+
+Callers: the chat/agent/enrichment routes (api/consent.py) and the background indexing
+(`ingestion.sync.sync_user`), which must not rely on StudyAtrium's 403 alone.
 """
 
 import logging
@@ -22,11 +26,27 @@ import time
 import httpx
 
 from studylife_ai.config import Settings
-from studylife_ai.ingestion.sync import is_consent_required
 from studylife_ai.studylife.client import StudyLifeClient
 from studylife_ai.studylife.registered_keys import RegisteredKeyStore
 
 logger = logging.getLogger(__name__)
+
+# StudyAtrium answers requests made with a user's AI key with 403 and this problem `type` while
+# that user has no consent covering the current AI provider (StudyAtrium's AiConsentService - the
+# migration case, a withdrawn consent, or a provider change). See docs/decisions.md "Provider
+# description endpoint".
+CONSENT_REQUIRED_PROBLEM = "ai-consent-required"
+
+
+def is_consent_required(exc: httpx.HTTPStatusError) -> bool:
+    """True when `exc` is StudyAtrium's 403 `ai-consent-required` problem."""
+    if exc.response.status_code != 403:
+        return False
+    try:
+        body = exc.response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("type") == CONSENT_REQUIRED_PROBLEM
 
 
 class ConsentRequired(Exception):

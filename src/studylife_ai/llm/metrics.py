@@ -1,17 +1,15 @@
 """Prometheus metrics for every LLM call (see docs/decisions.md "Metrics dashboard").
 
 Separate from `llm/logging.py`'s structured log lines - same source data (the
-LiteLLM callback), a second sink, not a replacement. Labeled by `user_id` so
-per-user cost can be aggregated in Grafana (`sum by (user_id) (...)`);
-cardinality is bounded in practice (call_site: 8 fixed values, model: a
-handful of configured models, user_id: this project's real user count), so a
-per-user label is safe here even though it wouldn't scale to a real
-multi-tenant SaaS with unbounded users.
+LiteLLM callback), a second sink, not a replacement. Deliberately aggregate
+only: there is no `user_id` (or any other personal) label, so `/metrics` never
+reveals who used the assistant or how much (GDPR audit S8). Labels are
+`call_site` (a few fixed values) and `model` (the configured models).
 """
 
 from prometheus_client import Counter, Histogram
 
-_LABELS = ("call_site", "model", "user_id")
+_LABELS = ("call_site", "model")
 
 LLM_CALLS_TOTAL = Counter(
     "studylife_ai_llm_calls_total",

@@ -6,6 +6,9 @@ suggestions for captured notes). It runs next to the StudyAtrium server of whoev
 instance. There is no vendor server in between: the operator of the instance is responsible for
 this service and for the AI provider they configured.
 
+**Controller:** the operator of your instance. **Publisher of this software:** see the imprint at
+<https://lktec.org/impressum>.
+
 ## What it reads
 
 - From your StudyAtrium account, using the AI key you generated there: your notes, courses,
@@ -23,10 +26,12 @@ this service and for the AI provider they configured.
 | Text chunks of your notes, courses, sessions and goals plus their embedding vectors, tagged with your user id | The Qdrant vector database the operator configured (`QDRANT_URL`), one partition per user | Until you revoke your AI key, your account is deleted, or the item is deleted in StudyAtrium (the next sync, every 60 s by default, removes it) |
 | Your AI key, encrypted at rest | SQLite file `registered_keys.db` (`REGISTERED_KEYS_DB_PATH`) | Until you revoke the key or delete your account |
 | Agent conversation state (checkpoints of `/agent` runs, including the messages of that run) | SQLite file `agent_checkpoints.db` (`AGENT_CHECKPOINT_DB_PATH`) | 30 days after the run's last activity (`AGENT_CHECKPOINT_TTL_DAYS`), or until revoke/account deletion |
-| Usage metrics: per call site, model and user id the number of calls, tokens, cost and latency | In memory, exposed at `/metrics` for the operator's monitoring (optionally protected by `METRICS_TOKEN`) | Counters live until the process restarts; the monitoring system keeps them as long as the operator configured |
+| Usage metrics: per call site and model the number of calls, tokens, cost and latency (aggregate, no user id or other personal label) | In memory, exposed at `/metrics` for the operator's monitoring (optionally protected by `METRICS_TOKEN`) | Counters live until the process restarts; the monitoring system keeps them as long as the operator configured |
 | Log lines: model, call site, latency, token counts and cost per model call; warnings and errors without message or note content | Container log of the operator | As configured by the operator's log stack |
 
-Chat messages themselves are not stored by this service outside agent checkpoints.
+Chat messages themselves (`/chat`) are not stored by this service. The only place a conversation
+is kept is the agent checkpoint above: for `/agent` the messages of a run are stored for 30 days
+after its last activity, so a proposed action can be confirmed later.
 
 ## Where your content is sent
 
@@ -34,12 +39,22 @@ To the AI provider the operator chose with `LLM_MODEL`, `EMBEDDING_MODEL`, `RERA
 `DATE_PARSE_MODEL` and, if set, `LISTING_INTENT_MODEL` (for example OpenAI, or a model the
 operator runs themselves). To list your notes or sessions for a chat question, the service reads
 them live from StudyAtrium with your own AI key and sends titles, a short preview, course names
-and dates of the listed items to the chat model; nothing of that is stored. Which provider
-that is, and whether it runs on infrastructure the operator controls, is reported by
+and dates of the listed items to the chat model; this listing data is not stored by this service
+itself (inside an `/agent` run it becomes part of that run's checkpoint, see above). When you save
+a web page with the capture extension, the page title and text are sent to the embedding and chat
+models to suggest a course, tags, a summary and related notes (web page enrichment).
+
+If the configured provider is a third party (for example OpenAI), your content is therefore
+processed by that provider, possibly outside the European Economic Area (third-country
+transfer); the operator is responsible for the safeguards that transfer needs. If the operator
+declared that all models run on their own infrastructure (`AI_MODELS_RUN_LOCALLY`), nothing leaves
+it. Which provider that is, and whether it runs on infrastructure the operator controls, is reported by
 `GET /internal/provider-info` and shown to you in StudyAtrium before you agree. Nothing is sent to
 a model before you have agreed: StudyAtrium refuses AI requests without a consent that covers the
-current provider, and this service verifies that consent itself before every chat, agent step and
-capture enrichment (`AI_CONSENT_CHECK`, on by default). It sends no analytics or telemetry
+current provider, and this service verifies that consent itself before every chat, agent step,
+capture enrichment and background indexing run for you (`AI_CONSENT_CHECK`; production
+deployments cannot switch it off or run without StudyAtrium). If consent is missing or cannot be
+verified, nothing is sent to a model and nothing new is indexed. It sends no analytics or telemetry
 anywhere else.
 
 ## Deleting your data

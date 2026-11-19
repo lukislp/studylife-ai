@@ -36,11 +36,6 @@ def _call_site(kwargs: dict[str, object]) -> str:
     return call_site if isinstance(call_site, str) else "unknown"
 
 
-def _user_id(kwargs: dict[str, object]) -> str:
-    user_id = _metadata(kwargs).get("user_id")
-    return user_id if isinstance(user_id, str) else "unknown"
-
-
 class UsageLogger(CustomLogger):
     """Logs model, call site, latency, tokens and cost after each call, and
     records the same values as Prometheus metrics (`llm/metrics.py`) for the
@@ -61,7 +56,6 @@ class UsageLogger(CustomLogger):
     ) -> None:
         call_site = _call_site(kwargs)
         model = str(kwargs.get("model"))
-        user_id = _user_id(kwargs)
         latency_seconds = (end_time - start_time).total_seconds()
         usage = getattr(response_obj, "usage", None)
         prompt_tokens = getattr(usage, "prompt_tokens", None)
@@ -79,7 +73,7 @@ class UsageLogger(CustomLogger):
             cost_usd,
         )
 
-        labels = {"call_site": call_site, "model": model, "user_id": user_id}
+        labels = {"call_site": call_site, "model": model}
         LLM_CALLS_TOTAL.labels(**labels, status="success").inc()
         LLM_LATENCY_SECONDS.labels(**labels).observe(latency_seconds)
         if isinstance(cost_usd, int | float):
@@ -98,7 +92,6 @@ class UsageLogger(CustomLogger):
     ) -> None:
         call_site = _call_site(kwargs)
         model = str(kwargs.get("model"))
-        user_id = _user_id(kwargs)
         latency_seconds = (end_time - start_time).total_seconds()
         exception = kwargs.get("exception")
 
@@ -110,7 +103,7 @@ class UsageLogger(CustomLogger):
             exception,
         )
 
-        labels = {"call_site": call_site, "model": model, "user_id": user_id}
+        labels = {"call_site": call_site, "model": model}
         LLM_CALLS_TOTAL.labels(**labels, status="failure").inc()
         LLM_LATENCY_SECONDS.labels(**labels).observe(latency_seconds)
 
