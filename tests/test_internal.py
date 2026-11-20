@@ -296,7 +296,10 @@ async def test_sync_new_registration_with_unverifiable_consent_skips_quietly(
     assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
-async def test_revoke_key_removes_the_key(internal_client: AsyncClient) -> None:
+async def test_revoke_key_removes_the_key(
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app.state, "qdrant_store", AsyncMock())
     await app.state.registered_key_store.set("alice", "key-a")
 
     response = await internal_client.post(
@@ -322,7 +325,10 @@ async def test_revoke_key_rejects_a_wrong_secret(internal_client: AsyncClient) -
     assert await app.state.registered_key_store.get("alice") == "key-a"
 
 
-async def test_revoke_key_is_a_noop_for_an_unknown_user(internal_client: AsyncClient) -> None:
+async def test_revoke_key_is_a_noop_for_an_unknown_user(
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app.state, "qdrant_store", AsyncMock())
     response = await internal_client.post(
         "/internal/revoke-key",
         json={"user_id": "does-not-exist"},
@@ -388,26 +394,47 @@ async def test_revoke_key_purges_only_the_target_users_checkpoint_threads(
         assert remaining == {"bob:thread-1"}
 
 
-async def test_revoke_key_still_deletes_the_registration_when_qdrant_deletion_fails(
+async def test_revoke_key_answers_503_and_keeps_the_registration_when_qdrant_fails(
     internal_client: AsyncClient, monkeypatch: MonkeyPatch, caplog: LogCaptureFixture
 ) -> None:
-    """Best-effort purge (F5/F13): a Qdrant hiccup must not leave the key registered - the
-    registration row is deleted regardless, after the best-effort deletes are attempted."""
+    """GDPR audit 2026-11-20 S2: a failed purge must not report success - the server would stop
+    retrying. The registration stays so the retry can find and finish the job."""
     await app.state.registered_key_store.set("alice", "key-a")
     fake_store = AsyncMock()
-    fake_store.delete_user.side_effect = RuntimeError("qdrant unreachable")
+    fake_store.delete_user.side_effect = RuntimeError("qdrant unreachable for alice")
     monkeypatch.setattr(app.state, "qdrant_store", fake_store)
 
-    with caplog.at_level(logging.ERROR, logger="studylife_ai.ingestion.sync"):
+    with caplog.at_level(logging.INFO):
         response = await internal_client.post(
             "/internal/revoke-key",
             json={"user_id": "alice"},
             headers={SHARED_SECRET_HEADER: TEST_SHARED_SECRET},
         )
 
-    assert response.status_code == 200
-    assert await app.state.registered_key_store.get("alice") is None
+    assert response.status_code == 503
+    assert await app.state.registered_key_store.get("alice") == "key-a"
     assert any("Qdrant" in record.message for record in caplog.records)
+    assert "alice" not in caplog.text
+
+
+async def test_revoke_key_retry_after_partial_failure_succeeds(
+    internal_client: AsyncClient, monkeypatch: MonkeyPatch
+) -> None:
+    await app.state.registered_key_store.set("alice", "key-a")
+    fake_store = AsyncMock()
+    fake_store.delete_user.side_effect = [RuntimeError("down"), None]
+    monkeypatch.setattr(app.state, "qdrant_store", fake_store)
+    headers = {SHARED_SECRET_HEADER: TEST_SHARED_SECRET}
+
+    first = await internal_client.post(
+        "/internal/revoke-key", json={"user_id": "alice"}, headers=headers
+    )
+    second = await internal_client.post(
+        "/internal/revoke-key", json={"user_id": "alice"}, headers=headers
+    )
+
+    assert (first.status_code, second.status_code) == (503, 200)
+    assert await app.state.registered_key_store.get("alice") is None
 
 
 async def test_enrich_capture_returns_the_enrichment_result(
