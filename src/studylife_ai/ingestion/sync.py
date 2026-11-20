@@ -1,10 +1,10 @@
 """Orchestrates one ingestion sync run, across all configured users.
 
-Full-list diff against Qdrant's own state (no separate manifest store —
+Full-list diff against Qdrant's own state (no separate manifest store â€”
 see docs/decisions.md "Incremental sync"): fetch all entities, compare each
 against its last known fingerprint, chunk+embed+upsert what's new or
 changed, delete what's gone. Runs across all four content types (notes,
-courses, sessions, course goals — see docs/decisions.md "Ingestion scope
+courses, sessions, course goals â€” see docs/decisions.md "Ingestion scope
 expansion") through one shared helper, since the diff/chunk/embed/upsert/
 delete control flow is identical for all of them. `sync_all()` then repeats
 this per StudyLife account registered in `RegisteredKeyStore` (see
@@ -81,7 +81,7 @@ def fingerprint_note(note: StudyLifeNote) -> str:
     """Content hash used to detect note changes.
 
     Deliberately not `note.updated_at`: StudyLife sets it via a server-local
-    `DateTime.Now`, not UTC (see docs/decisions.md) — a content hash sidesteps
+    `DateTime.Now`, not UTC (see docs/decisions.md) â€” a content hash sidesteps
     that ambiguity entirely and also catches edits if the timestamp somehow
     wasn't bumped. Hashes title+content+is_markdown (not just content) since a
     title-only edit should still refresh stored metadata, and toggling
@@ -322,6 +322,15 @@ async def _delete_checkpoint_threads(checkpointer: AsyncSqliteSaver, user_id: st
         await checkpointer.adelete_thread(thread_id)
 
 
+class PurgeIncompleteError(Exception):
+    """At least one step of `purge_user` failed. The registration row is still in place, so the
+    caller can report the failure (StudyAtrium's outbox then retries) and a retry is safe."""
+
+    def __init__(self, failed_steps: Sequence[str]) -> None:
+        super().__init__(f"purge incomplete: {', '.join(failed_steps)}")
+        self.failed_steps = tuple(failed_steps)
+
+
 async def purge_user(
     *,
     user_id: str,
@@ -334,27 +343,35 @@ async def purge_user(
     immediate) and this module's own zombie cleanup below (after `ZOMBIE_401_THRESHOLD`
     consecutive 401s).
 
-    Order: the Qdrant partition and checkpoint threads are deleted first, best-effort - a
-    failure there is logged, never raised, so one hiccup can't block the rest of the purge. The
-    `registered_keys` row is deleted LAST, only after both attempts have run: if the process
-    died partway through, the registration would still be there afterwards, so the next revoke
-    (or the next zombie-threshold trip) simply retries the whole purge - the alternative order
-    (deleting the key row first) would instead risk silently orphaning Qdrant data or checkpoint
-    threads with no registration left to ever trigger their cleanup again.
+    Every step is attempted even when an earlier one failed, so one hiccup does not block the
+    rest. If any step failed, the `registered_keys` row is KEPT and `PurgeIncompleteError` is
+    raised: the caller must not report success, because the registration is what lets a retry
+    (StudyAtrium's outbox, or the next zombie-threshold tick) find and finish the job; deleting
+    it would orphan the vectors or checkpoints with nothing left to trigger their cleanup
+    (GDPR audit 2026-11-20 S2). The row is deleted only after every other step succeeded.
+
+    Idempotent: every step treats "already gone" as success (a missing Qdrant collection, no
+    matching checkpoint threads, no registration row), so a retry after a partial success
+    simply completes the remaining steps.
+
+    Failures are logged by step and exception type only - no user id, no exception text (which
+    could echo request data).
     """
+    failed: list[str] = []
     try:
         await store.delete_user(user_id=user_id)
-    except Exception:
-        logger.exception("Purge: failed to delete Qdrant partition for user_id=%s", user_id)
+    except Exception as exc:
+        logger.error("Purge: Qdrant partition delete failed (%s)", type(exc).__name__)
+        failed.append("qdrant")
     try:
         await _delete_checkpoint_threads(checkpointer, user_id)
-    except Exception:
-        logger.exception("Purge: failed to delete checkpoint threads for user_id=%s", user_id)
+    except Exception as exc:
+        logger.error("Purge: checkpoint thread delete failed (%s)", type(exc).__name__)
+        failed.append("checkpoints")
+    if failed:
+        raise PurgeIncompleteError(failed)
     await key_store.delete(user_id)
-    logger.info(
-        "Purge: user_id=%s fully removed (registration, Qdrant partition, checkpoints)", user_id
-    )
-
+    logger.info("Purge: user fully removed (registration, Qdrant partition, checkpoints)")
 
 async def sync_all(
     settings: Settings, *, registered_keys: RegisteredKeyStore | None = None
@@ -471,6 +488,10 @@ async def _handle_sync_401(
     )
     async with AsyncSqliteSaver.from_conn_string(settings.agent_checkpoint_db_path) as checkpointer:
         await checkpointer.setup()
-        await purge_user(
-            user_id=user_id, store=store, checkpointer=checkpointer, key_store=registered_keys
-        )
+        try:
+            await purge_user(
+                user_id=user_id, store=store, checkpointer=checkpointer, key_store=registered_keys
+            )
+        except PurgeIncompleteError:
+            # The registration is kept, so the next tick's 401 retries the purge.
+            logger.warning("Sync: zombie purge incomplete, will retry on the next sync")

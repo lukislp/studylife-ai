@@ -26,7 +26,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from studylife_ai.api.consent import enforce_ai_consent
 from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
-from studylife_ai.ingestion.sync import note_consent_pause, purge_user, sync_user
+from studylife_ai.ingestion.sync import (
+    PurgeIncompleteError,
+    note_consent_pause,
+    purge_user,
+    sync_user,
+)
 from studylife_ai.llm.provider_info import describe_providers
 from studylife_ai.rag.enrichment import enrich_capture
 from studylife_ai.schemas.internal import (
@@ -150,12 +155,18 @@ async def revoke_key(request: RevokeKeyRequest, http_request: Request) -> dict[s
     implementation, not two."""
     _require_valid_secret(http_request)
     forget_consent(request.user_id)
-    await purge_user(
-        user_id=request.user_id,
-        store=http_request.app.state.qdrant_store,
-        checkpointer=http_request.app.state.agent_checkpointer,
-        key_store=http_request.app.state.registered_key_store,
-    )
+    try:
+        await purge_user(
+            user_id=request.user_id,
+            store=http_request.app.state.qdrant_store,
+            checkpointer=http_request.app.state.agent_checkpointer,
+            key_store=http_request.app.state.registered_key_store,
+        )
+    except PurgeIncompleteError as exc:
+        # 503, not 200 (GDPR audit 2026-11-20 S2): StudyAtrium keeps the outbox row and retries
+        # with backoff; the registration is still here, and the purge is idempotent.
+        logger.warning("Revoke: purge incomplete (%s), answering 503", ", ".join(exc.failed_steps))
+        raise HTTPException(status_code=503, detail="purge incomplete, retry") from exc
     logger.info("Revoked AiApiKey for user_id=%s", request.user_id)
     return {"ok": True}
 
