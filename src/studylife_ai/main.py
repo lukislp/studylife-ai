@@ -14,7 +14,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from studylife_ai.agent.checkpoint_cleanup import run_periodic_checkpoint_cleanup
 from studylife_ai.api import agent, chat, health
-from studylife_ai.config import get_settings
+from studylife_ai.config import Settings, get_settings
 from studylife_ai.ingestion.qdrant_store import QdrantStore
 from studylife_ai.ingestion.scheduler import run_periodic_sync
 from studylife_ai.internal_server import (
@@ -31,6 +31,16 @@ from studylife_ai.tls import (
     tls_files,
     watch_certificates,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def warn_if_consent_check_disabled(settings: Settings) -> None:
+    if settings.unsafe_disable_ai_consent_check:
+        logger.warning(
+            "UNSAFE_DISABLE_AI_CONSENT_CHECK is on: user content is sent to the model WITHOUT "
+            "verifying the AI consent. Never use this outside tests and local development."
+        )
 
 
 def _require_metrics_token(request: Request) -> None:
@@ -50,6 +60,7 @@ def _require_metrics_token(request: Request) -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    warn_if_consent_check_disabled(settings)
     # One QdrantStore for the app's lifetime instead of one per /chat request —
     # avoids opening/closing a new HTTP client (and its connection pool) on every call.
     app.state.qdrant_store = QdrantStore(
