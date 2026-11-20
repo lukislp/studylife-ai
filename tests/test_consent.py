@@ -27,7 +27,12 @@ CONSENT_PROBLEM = {"type": "ai-consent-required", "title": "AI consent required"
 
 
 def _settings(**overrides: object) -> Settings:
-    return Settings(studylife_api_base_url="http://studylife.test", **overrides)  # type: ignore[arg-type]
+    values: dict[str, object] = {
+        "studylife_api_base_url": "http://studylife.test",
+        "unsafe_disable_ai_consent_check": False,
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
 
 
 async def _store_with(user_id: str, key: str | None) -> RegisteredKeyStore:
@@ -175,12 +180,39 @@ async def test_withdrawal_after_cache_expiry_is_picked_up() -> None:
     await store.close()
 
 
-async def test_check_can_be_switched_off_and_needs_a_studylife_url() -> None:
+async def test_explicit_opt_out_skips_the_check() -> None:
     store = await _store_with("alice", None)  # would be unverifiable if checked
-    await ensure_ai_consent("alice", settings=_settings(ai_consent_check=False), key_store=store)
     await ensure_ai_consent(
-        "alice", settings=Settings(studylife_api_base_url=None), key_store=store
+        "alice", settings=_settings(unsafe_disable_ai_consent_check=True), key_store=store
     )
+    await store.close()
+
+
+@pytest.mark.parametrize("environment", ["local", "staging"])
+async def test_missing_studylife_url_fails_closed_outside_production(environment: str) -> None:
+    store = await _store_with("alice", "key-a")
+    settings = Settings(
+        _env_file=None,
+        environment=environment,  # type: ignore[arg-type]
+        studylife_api_base_url=None,
+        unsafe_disable_ai_consent_check=False,
+    )
+    with pytest.raises(ConsentUnverifiable):
+        await ensure_ai_consent("alice", settings=settings, key_store=store)
+    await store.close()
+
+
+async def test_the_environment_name_alone_never_skips_the_check() -> None:
+    store = await _store_with("alice", None)
+    for environment in ("local", "staging"):
+        settings = Settings(
+            _env_file=None,
+            environment=environment,  # type: ignore[arg-type]
+            studylife_api_base_url="http://studylife.test",
+            unsafe_disable_ai_consent_check=False,
+        )
+        with pytest.raises(ConsentUnverifiable):  # no registered key -> cannot verify
+            await ensure_ai_consent("alice", settings=settings, key_store=store)
     await store.close()
 
 
@@ -267,6 +299,7 @@ async def test_enrich_capture_asks_studylife_with_the_users_key_end_to_end(
         return real_client(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(consent_module, "StudyLifeClient", client_with_mock_transport)
+    monkeypatch.setattr("studylife_ai.api.consent.get_settings", _settings)
     await app.state.registered_key_store.set("alice", "key-a")
 
     response = await internal_client.post(

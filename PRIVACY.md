@@ -52,8 +52,8 @@ it. Which provider that is, and whether it runs on infrastructure the operator c
 `GET /internal/provider-info` and shown to you in StudyAtrium before you agree. Nothing is sent to
 a model before you have agreed: StudyAtrium refuses AI requests without a consent that covers the
 current provider, and this service verifies that consent itself before every chat, agent step,
-capture enrichment and background indexing run for you (`AI_CONSENT_CHECK`; production
-deployments cannot switch it off or run without StudyAtrium). If consent is missing or cannot be
+capture enrichment and background indexing run for you (the check is always on and fails closed in every environment;
+production deployments cannot switch it off or run without StudyAtrium). If consent is missing or cannot be
 verified, nothing is sent to a model and nothing new is indexed. It sends no analytics or telemetry
 anywhere else.
 

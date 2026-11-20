@@ -78,11 +78,12 @@ class Settings(BaseSettings):
     # /agent/confirm, /internal/enrich-capture) this service itself asks StudyAtrium, with the
     # user's registered AiApiKey, whether that user has an AI consent covering the current
     # provider (StudyAtrium answers 403 `ai-consent-required` otherwise) instead of trusting the
-    # caller to have checked. On by default; "false" restores the old trust-the-caller behaviour
-    # for local development only: with ENVIRONMENT=production, "false" (or an unset
-    # `studylife_api_base_url`, which leaves nothing to ask) makes startup fail (S8, see the
-    # validator below).
-    ai_consent_check: bool = True
+    # caller to have checked. The check is ALWAYS on and fails closed in every environment: a
+    # missing `studylife_api_base_url` makes it answer "cannot verify" (503), never "allowed".
+    # The only way to skip it is this explicit, deliberately unwieldy opt-in (default off, a
+    # warning at startup, refused with ENVIRONMENT=production); it is never implied by the
+    # environment name (GDPR audit 2026-11-20 S8b).
+    unsafe_disable_ai_consent_check: bool = False
     # How long a positive consent answer is reused per user, so a chat burst is not one extra
     # StudyAtrium round-trip per request. A withdrawal takes effect after at most this long.
     ai_consent_cache_seconds: float = 30.0
@@ -355,10 +356,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_enforces_consent_check(self) -> "Settings":
-        """Fail closed (GDPR audit S8): in production the service refuses to start when the
-        consent check cannot run, instead of serving chat/agent/indexing without it. Outside
-        production `AI_CONSENT_CHECK=false` or a missing `STUDYLIFE_API_BASE_URL` stay available
-        for local development and tests."""
+        """In production the service refuses to start when the consent check cannot run or is
+        switched off (GDPR audit S8). Outside production the check is equally on by default;
+        only the explicit `UNSAFE_DISABLE_AI_CONSENT_CHECK` opt-in turns it off."""
         if self.environment != "production":
             return self
         if not self.studylife_api_base_url:
@@ -366,8 +366,10 @@ class Settings(BaseSettings):
                 "STUDYLIFE_API_BASE_URL must be set when ENVIRONMENT=production: "
                 "the AI consent check needs StudyAtrium."
             )
-        if not self.ai_consent_check:
-            raise ValueError("AI_CONSENT_CHECK=false is not allowed when ENVIRONMENT=production")
+        if self.unsafe_disable_ai_consent_check:
+            raise ValueError(
+                "UNSAFE_DISABLE_AI_CONSENT_CHECK is not allowed when ENVIRONMENT=production"
+            )
         return self
 
     @property

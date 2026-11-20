@@ -12,9 +12,11 @@ Outcomes:
 - no consent: raises `ConsentRequired`
 - cannot be established (no registered key, key rejected, StudyLife unreachable or erroring):
   raises `ConsentUnverifiable` - fail closed, nothing is sent to a model
-- check disabled (`AI_CONSENT_CHECK=false`) or no `STUDYLIFE_API_BASE_URL`: returns without
-  asking. Only possible outside production: `Settings` refuses to load with
-  `ENVIRONMENT=production` and either of those, so production always fails closed (GDPR audit S8).
+- no `STUDYLIFE_API_BASE_URL`: raises `ConsentUnverifiable` (fail closed in every environment,
+  GDPR audit 2026-11-20 S8b)
+- `UNSAFE_DISABLE_AI_CONSENT_CHECK=true`: returns without asking. An explicit opt-in for tests and
+  local development only (warned about at startup); `Settings` refuses it with
+  `ENVIRONMENT=production`.
 
 Callers: the chat/agent/enrichment routes (api/consent.py) and the background indexing
 (`ingestion.sync.sync_user`), which must not rely on StudyAtrium's 403 alone.
@@ -77,8 +79,11 @@ async def ensure_ai_consent(
     key_store: RegisteredKeyStore,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
-    if not settings.ai_consent_check or not settings.studylife_api_base_url:
+    if settings.unsafe_disable_ai_consent_check:
         return
+    if not settings.studylife_api_base_url:
+        logger.warning("AI consent not verifiable: STUDYLIFE_API_BASE_URL is not configured")
+        raise ConsentUnverifiable("No StudyAtrium base URL configured to verify the consent.")
 
     deadline = _allowed_until.get(user_id)
     if deadline is not None and deadline > time.monotonic():
