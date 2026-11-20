@@ -1,6 +1,7 @@
 """Server-side AI consent gate (GDPR audit F-20): studylife/consent.py and its API wiring."""
 
 import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -308,6 +309,7 @@ async def test_revoke_key_drops_the_cached_consent(
     )
     assert "alice" in consent_module._allowed_until
     await app.state.registered_key_store.set("alice", "key-a")
+    monkeypatch.setattr(app.state, "qdrant_store", AsyncMock())
 
     await internal_client.post(
         "/internal/revoke-key",

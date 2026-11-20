@@ -492,34 +492,36 @@ async def test_purge_user_deletes_qdrant_partition_checkpoint_threads_and_the_ke
     await key_store.close()
 
 
-async def test_purge_user_deletes_the_key_row_even_when_qdrant_deletion_fails(
+async def test_purge_user_raises_and_keeps_the_key_row_when_qdrant_deletion_fails(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Best-effort (F5/F13): a Qdrant hiccup must not leave the key registered."""
+    """GDPR audit 2026-11-20 S2: failure is reported and the registration kept for the retry."""
     store = AsyncMock()
-    store.delete_user.side_effect = RuntimeError("qdrant unreachable")
+    store.delete_user.side_effect = RuntimeError("qdrant unreachable for alice")
     key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
     await key_store.setup()
     await key_store.set("alice", "key-a")
 
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
         await checkpointer.setup()
-        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
+        with (
+            caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"),
+            pytest.raises(sync_module.PurgeIncompleteError) as excinfo,
+        ):
             await sync_module.purge_user(
                 user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
             )
 
-    assert await key_store.get("alice") is None
+    assert excinfo.value.failed_steps == ("qdrant",)
+    assert await key_store.get("alice") == "key-a"
     assert any("Qdrant" in record.message for record in caplog.records)
+    assert "alice" not in caplog.text
     await key_store.close()
 
 
-async def test_purge_user_deletes_the_key_row_even_when_checkpoint_deletion_fails(
+async def test_purge_user_raises_and_keeps_the_key_row_when_checkpoint_deletion_fails(
     tmp_path: Path, monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Best-effort (F5/F13): a checkpoint-store hiccup must not leave the key registered
-    either - Qdrant and checkpoints are independent best-effort steps, neither blocks the
-    other or the final registration delete."""
     store = AsyncMock()
     key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
     await key_store.setup()
@@ -532,13 +534,56 @@ async def test_purge_user_deletes_the_key_row_even_when_checkpoint_deletion_fail
             checkpointer, "adelete_thread", AsyncMock(side_effect=RuntimeError("locked"))
         )
 
-        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
+        with (
+            caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"),
+            pytest.raises(sync_module.PurgeIncompleteError) as excinfo,
+        ):
             await sync_module.purge_user(
                 user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
             )
 
-    assert await key_store.get("alice") is None
+    # Qdrant was still attempted: the steps are independent.
+    store.delete_user.assert_awaited_once_with(user_id="alice")
+    assert excinfo.value.failed_steps == ("checkpoints",)
+    assert await key_store.get("alice") == "key-a"
     assert any("checkpoint" in record.message.lower() for record in caplog.records)
+    assert "alice" not in caplog.text
+    await key_store.close()
+
+
+async def test_purge_user_retry_after_partial_success_completes(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Qdrant succeeds, checkpoints fail; the retry re-runs the (already done) Qdrant delete as a
+    success and finishes the rest, ending with the registration removed."""
+    store = AsyncMock()
+    key_store = RegisteredKeyStore(":memory:", TEST_AI_KEY_ENCRYPTION_KEY)
+    await key_store.setup()
+    await key_store.set("alice", "key-a")
+
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
+        await checkpointer.setup()
+        await _insert_checkpoint_row(checkpointer, "alice:thread-1")
+        with monkeypatch.context() as broken:
+            broken.setattr(
+                checkpointer, "adelete_thread", AsyncMock(side_effect=RuntimeError("locked"))
+            )
+            with pytest.raises(sync_module.PurgeIncompleteError):
+                await sync_module.purge_user(
+                    user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+                )
+        assert await key_store.get("alice") == "key-a"
+
+        await sync_module.purge_user(
+            user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+        )
+        # A further repeat with nothing left is still a success.
+        await sync_module.purge_user(
+            user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+        )
+        assert await _checkpoint_thread_ids(checkpointer) == set()
+
+    assert await key_store.get("alice") is None
     await key_store.close()
 
 
