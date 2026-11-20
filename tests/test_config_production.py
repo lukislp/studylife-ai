@@ -59,9 +59,7 @@ def test_startup_warns_when_the_opt_out_is_on(caplog: pytest.LogCaptureFixture) 
     import studylife_ai.main as main_module
 
     with caplog.at_level(logging.WARNING, logger="studylife_ai.main"):
-        main_module.warn_if_consent_check_disabled(
-            _settings(unsafe_disable_ai_consent_check=True)
-        )
+        main_module.warn_if_consent_check_disabled(_settings(unsafe_disable_ai_consent_check=True))
 
     assert any("UNSAFE_DISABLE_AI_CONSENT_CHECK" in r.message for r in caplog.records)
 
