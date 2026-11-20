@@ -373,6 +373,7 @@ async def purge_user(
     await key_store.delete(user_id)
     logger.info("Purge: user fully removed (registration, Qdrant partition, checkpoints)")
 
+
 async def sync_all(
     settings: Settings, *, registered_keys: RegisteredKeyStore | None = None
 ) -> None:

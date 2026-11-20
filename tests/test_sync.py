@@ -504,11 +504,13 @@ async def test_purge_user_raises_and_keeps_the_key_row_when_qdrant_deletion_fail
 
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as checkpointer:
         await checkpointer.setup()
-        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
-            with pytest.raises(sync_module.PurgeIncompleteError) as excinfo:
-                await sync_module.purge_user(
-                    user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
-                )
+        with (
+            caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"),
+            pytest.raises(sync_module.PurgeIncompleteError) as excinfo,
+        ):
+            await sync_module.purge_user(
+                user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+            )
 
     assert excinfo.value.failed_steps == ("qdrant",)
     assert await key_store.get("alice") == "key-a"
@@ -532,11 +534,13 @@ async def test_purge_user_raises_and_keeps_the_key_row_when_checkpoint_deletion_
             checkpointer, "adelete_thread", AsyncMock(side_effect=RuntimeError("locked"))
         )
 
-        with caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"):
-            with pytest.raises(sync_module.PurgeIncompleteError) as excinfo:
-                await sync_module.purge_user(
-                    user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
-                )
+        with (
+            caplog.at_level("ERROR", logger="studylife_ai.ingestion.sync"),
+            pytest.raises(sync_module.PurgeIncompleteError) as excinfo,
+        ):
+            await sync_module.purge_user(
+                user_id="alice", store=store, checkpointer=checkpointer, key_store=key_store
+            )
 
     # Qdrant was still attempted: the steps are independent.
     store.delete_user.assert_awaited_once_with(user_id="alice")
